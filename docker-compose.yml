@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  icecast:
+    image: infiniteproject/icecast
+    container_name: icecast
+    ports:
+      - "8000:8000"
+    environment:
+      ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_ADMIN_PASSWORD: hackme
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  live2audio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: live2audio
+    ports:
+      - "5000:5000"
+    environment:
+      ICECAST_URL: "icecast://source:hackme@icecast:8000/stream"
+    depends_on:
+      icecast:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/control?action=stop"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_POLL_INTERVAL: 300   # Check every 5 minutes
+    restart: unless-stopped
