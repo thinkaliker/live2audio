@@ -1,13 +1,11 @@
-version: '3.8'
-
 services:
   icecast:
-    image: infiniteproject/icecast
+    image: pltnk/icecast
     container_name: icecast
     ports:
       - "8000:8000"
     environment:
-      ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_SOURCE_PASSWORD: source
       ICECAST_ADMIN_PASSWORD: hackme
     volumes:
       - ./icecast.xml:/etc/icecast2/icecast.xml:ro

@@ -19,9 +19,14 @@ AUTHOR'S NOTE: this project was vibe-coded, mostly to see if it's possible. The 
 ### Clone the Repository
 
 `git clone https://github.com/thinkaliker/live2audio.git`
+
 `cd live2audio`
 
-### Build and Start Using Docker Compose
+### Pull images
+
+`docker compose pull`
+
+### Start Using Docker Compose
 
 `docker compose up`
 
@@ -56,7 +61,7 @@ Service	URLs
 
 | Variable    | Default                                        | Description                    |
 |-------------|------------------------------------------------|--------------------------------|
-| ICECAST_URL | `icecast://source:hackme@icecast:8000/stream`  | URL used to stream to icecast  |
+| ICECAST_URL | `icecast://source:hackme@localhost:8000/stream`  | URL used to stream to icecast  |
 
 ## Updating Services
 
