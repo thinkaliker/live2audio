@@ -9,13 +9,6 @@ services:
       ICECAST_ADMIN_PASSWORD: hackme
     volumes:
       - ./icecast.xml:/etc/icecast2/icecast.xml:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   live2audio:
     image: thinkaliker/live2audio
@@ -24,9 +17,6 @@ services:
       - "5000:5000"
     environment:
       ICECAST_URL: "icecast://source:hackme@localhost:8000/stream"
-    depends_on:
-      icecast:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/ping"]
