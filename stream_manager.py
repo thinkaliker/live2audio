@@ -45,6 +45,11 @@ def stop_stream():
             stream_process.wait()
             stream_process = None
 
+@app.route('/ping', methods=['GET'])
+def return_pong():
+    return "pong", 400
+
+
 @app.route('/control', methods=['GET'])
 def control_stream():
     action = request.args.get('action')
