@@ -1,6 +1,6 @@
 services:
   icecast:
-    image: pltnk/icecast
+    image: pltnk/icecast2
     container_name: icecast
     ports:
       - "8000:8000"
