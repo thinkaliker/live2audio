@@ -6,7 +6,7 @@ app = Flask(__name__)
 def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
-@app.route('/stream.mp3')
+@app.route('/stream.mp3', methods=['GET', 'HEAD'])
 def stream_audio():
     video_id = request.args.get('v')
     if not video_id:
@@ -16,37 +16,42 @@ def stream_audio():
     if request.method == 'HEAD':
         return Response(mimetype="audio/mpeg")
     
-    youtube_url = build_youtube_url(video_id)
+    print(f"--- New stream request: {video_id} ---")
     
     def generate():
+        print(f"Starting yt-dlp for {video_id}...")
         # Use yt-dlp to get the audio URL and ffmpeg to transcode it to mp3 on the fly
         command = [
             'yt-dlp',
             '-f', 'bestaudio',
             '--quiet',
             '--no-warnings',
+            '--no-playlist',
             '-o', '-',
             youtube_url
         ]
         
         # Optimize ffmpeg for streaming:
-        # -re: read input at native frame rate (important for live streams)
+        # -flush_packets 1: send data immediately
+        # -fflags nobuffer: reduce internal buffering
         # -loglevel error: reduce noise
         ffmpeg_command = [
             'ffmpeg',
-            '-re',
             '-i', 'pipe:0',
             '-f', 'mp3',
             '-acodec', 'libmp3lame',
             '-ab', '128k',
+            '-flush_packets', '1',
+            '-fflags', 'nobuffer',
             '-loglevel', 'error',
             'pipe:1'
         ]
         
-        # Use DEVNULL for stderr to avoid pipe-fill deadlock
-        ytdlp_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        # Use bufsize=0 to minimize pipe latency
+        ytdlp_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+        ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
         
+        print("Subprocesses started, streaming beginning...")
         try:
             while True:
                 chunk = ffmpeg_process.stdout.read(4096)
@@ -54,8 +59,9 @@ def stream_audio():
                     break
                 yield chunk
         except Exception as e:
-            print(f"Streaming error: {e}")
+            print(f"Streaming error for {video_id}: {e}")
         finally:
+            print(f"Cleaning up stream {video_id}...")
             ffmpeg_process.terminate()
             ytdlp_process.terminate()
             try:
