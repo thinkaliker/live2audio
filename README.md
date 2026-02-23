@@ -19,17 +19,23 @@ The previous Icecast-based method required a persistent connection and a running
    - For the **File or URL**, create a local file (e.g., `youtube.m3u`) or use a Data URI.
 
 ### M3U Example
-Create a file called `youtube.m3u` and add your favorite streams:
+Create a file called `youtube.m3u` and add your favorite streams. For Jellyfin, adding `tvg-id` and `group-title` helps categorization:
 
 ```text
 #EXTM3U
-#EXTINF:-1, Lofi Girl - Radio
+#EXTINF:-1 tvg-id="LofiGirl" group-title="YouTube Radio", Lofi Girl - Radio
 http://YOUR_SERVER_IP:5000/stream.mp3?v=jfKfPfyJRdk
-#EXTINF:-1, Synthwave Radio
+#EXTINF:-1 tvg-id="Synthwave" group-title="YouTube Radio", Synthwave Radio
 http://YOUR_SERVER_IP:5000/stream.mp3?v=4xDzrJKXOOY
 ```
 
 Replace `YOUR_SERVER_IP` with the IP of the machine running this docker container, and `v=` with any YouTube Video ID.
+
+## Troubleshooting Jellyfin
+
+- **Manifest Unknown / Probe Failed**: Ensure the container is running and the IP is accessible. The server now handles `HEAD` requests to help Jellyfin's initial probe.
+- **Stream Stops**: YouTube sometimes rotates stream URLs. Restarting the channel in Jellyfin will force a fresh fetch through `yt-dlp`.
+- **Latency**: There is an inherent 2-5 second delay as `yt-dlp` resolves the YouTube stream and `ffmpeg` starts transcoding.
 
 ## How it works
 - **Flask**: Receives the request from Jellyfin.

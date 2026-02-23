@@ -12,11 +12,14 @@ def stream_audio():
     if not video_id:
         return "Missing video ID", 400
     
+    # Handle HEAD requests for player probing without starting the stream
+    if request.method == 'HEAD':
+        return Response(mimetype="audio/mpeg")
+    
     youtube_url = build_youtube_url(video_id)
     
     def generate():
         # Use yt-dlp to get the audio URL and ffmpeg to transcode it to mp3 on the fly
-        # This ensures compatibility with most players
         command = [
             'yt-dlp',
             '-f', 'bestaudio',
@@ -26,30 +29,28 @@ def stream_audio():
             youtube_url
         ]
         
-        # We pipe yt-dlp to ffmpeg to ensure we are sending a consistent mp3 stream
+        # Optimize ffmpeg for streaming:
+        # -re: read input at native frame rate (important for live streams)
+        # -loglevel error: reduce noise
         ffmpeg_command = [
             'ffmpeg',
+            '-re',
             '-i', 'pipe:0',
             '-f', 'mp3',
             '-acodec', 'libmp3lame',
             '-ab', '128k',
+            '-loglevel', 'error',
             'pipe:1'
         ]
         
-        ytdlp_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Use DEVNULL for stderr to avoid pipe-fill deadlock
+        ytdlp_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         
         try:
             while True:
                 chunk = ffmpeg_process.stdout.read(4096)
                 if not chunk:
-                    # Check if either process failed
-                    if ffmpeg_process.poll() is not None and ffmpeg_process.returncode != 0:
-                        stderr = ffmpeg_process.stderr.read().decode()
-                        print(f"FFmpeg error: {stderr}")
-                    if ytdlp_process.poll() is not None and ytdlp_process.returncode != 0:
-                        stderr = ytdlp_process.stderr.read().decode()
-                        print(f"yt-dlp error: {stderr}")
                     break
                 yield chunk
         except Exception as e:
@@ -64,7 +65,17 @@ def stream_audio():
                 ffmpeg_process.kill()
                 ytdlp_process.kill()
 
-    return Response(generate(), mimetype="audio/mpeg")
+    return Response(
+        generate(), 
+        mimetype="audio/mpeg",
+        headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Accept-Ranges': 'none',
+            'Access-Control-Allow-Origin': '*'
+        }
+    )
 
 @app.route('/ping')
 def ping():
