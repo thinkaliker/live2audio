@@ -2,6 +2,8 @@ services:
   live2audio:
     image: ghcr.io/thinkaliker/live2audio:latest
     container_name: live2audio
+    environment:
+      - PYTHONUNBUFFERED=1
     ports:
       - "5000:5000"
     restart: unless-stopped

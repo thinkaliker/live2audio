@@ -8,7 +8,14 @@ def build_youtube_url(video_id):
 
 @app.before_request
 def log_request():
-    print(f"Incoming request: {request.method} {request.url}")
+    # flush=True is critical for Docker logs to show up immediately
+    print(f"Incoming request: {request.method} {request.url}", flush=True)
+
+@app.errorhandler(404)
+def page_not_found(e):
+    # This helps identify if Jellyfin is hitting an unexpected path
+    print(f"404 ERROR: {request.method} {request.url}", flush=True)
+    return f"Path {request.path} not found", 404
 
 @app.route('/')
 def index():
@@ -26,7 +33,7 @@ def stream_audio():
     if request.method == 'HEAD':
         return Response(mimetype="audio/mpeg")
     
-    print(f"--- New stream request: {video_id} ---")
+    print(f"--- New stream request: {video_id} ---", flush=True)
     
     def generate():
         print(f"Starting yt-dlp for {video_id}...")
