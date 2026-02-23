@@ -6,11 +6,21 @@ app = Flask(__name__)
 def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
+@app.before_request
+def log_request():
+    print(f"Incoming request: {request.method} {request.url}")
+
+@app.route('/')
+def index():
+    return "Live2Audio Server is Running. Use /stream.mp3?v=VIDEO_ID to stream.", 200
+
 @app.route('/stream.mp3', methods=['GET', 'HEAD'])
 def stream_audio():
     video_id = request.args.get('v')
     if not video_id:
         return "Missing video ID", 400
+    
+    youtube_url = build_youtube_url(video_id)
     
     # Handle HEAD requests for player probing without starting the stream
     if request.method == 'HEAD':

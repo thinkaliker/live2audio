@@ -1,13 +1,11 @@
-FROM python:3.11-slim
+FROM python:3.11-alpine
 
-RUN apt-get update && \
-    apt-get install -y ffmpeg curl python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+# Combine package installation and pip cleanup to minimize layers
+RUN apk add --no-cache ffmpeg curl && \
+    pip install --no-cache-dir flask yt-dlp
 
 WORKDIR /app
 COPY stream_manager.py .
-
-RUN pip install --no-cache-dir flask yt-dlp
 
 EXPOSE 5000
 
