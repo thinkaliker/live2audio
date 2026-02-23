@@ -1,22 +1,9 @@
 services:
-  icecast:
-    image: pltnk/icecast2
-    container_name: icecast
-    ports:
-      - "8000:8000"
-    environment:
-      ICECAST_SOURCE_PASSWORD: source
-      ICECAST_ADMIN_PASSWORD: hackme
-    volumes:
-      - ./icecast.xml:/etc/icecast2/icecast.xml:ro
-
   live2audio:
-    image: thinkaliker/live2audio
+    build: .
     container_name: live2audio
     ports:
       - "5000:5000"
-    environment:
-      ICECAST_URL: "icecast://source:hackme@localhost:8000/stream"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/ping"]
@@ -31,5 +18,5 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      WATCHTOWER_POLL_INTERVAL: 300   # Check every 5 minutes
+      WATCHTOWER_POLL_INTERVAL: 300
     restart: unless-stopped

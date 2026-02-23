@@ -1,76 +1,72 @@
-from flask import Flask, request, jsonify
 import subprocess
-import threading
-import signal
-import os
+from flask import Flask, Response, request, jsonify
 
 app = Flask(__name__)
-
-# Global variables to manage the streaming process
-stream_process = None
-lock = threading.Lock()
-
-# Load Icecast URL from environment variable
-ICECAST_URL = os.environ.get('ICECAST_URL')
-
-if not ICECAST_URL:
-    raise ValueError("Missing required environment variable: ICECAST_URL")
 
 def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
-def start_stream(video_id, stream_type):
-    global stream_process
-
-    with lock:
-        stop_stream()
-
-        youtube_url = build_youtube_url(video_id)
-        print(f"Starting {stream_type} stream: {youtube_url}")
-
+@app.route('/stream.mp3')
+def stream_audio():
+    video_id = request.args.get('v')
+    if not video_id:
+        return "Missing video ID", 400
+    
+    youtube_url = build_youtube_url(video_id)
+    
+    def generate():
+        # Use yt-dlp to get the audio URL and ffmpeg to transcode it to mp3 on the fly
+        # This ensures compatibility with most players
         command = [
-            'bash', '-c',
-            f'yt-dlp -f bestaudio -o - "{youtube_url}" | ffmpeg -i pipe:0 '
-            f'-vn -acodec libmp3lame -ab 128k -content_type audio/mpeg '
-            f'-f mp3 "{ICECAST_URL}"'
+            'yt-dlp',
+            '-f', 'bestaudio',
+            '--quiet',
+            '--no-warnings',
+            '-o', '-',
+            youtube_url
         ]
+        
+        # We pipe yt-dlp to ffmpeg to ensure we are sending a consistent mp3 stream
+        ffmpeg_command = [
+            'ffmpeg',
+            '-i', 'pipe:0',
+            '-f', 'mp3',
+            '-acodec', 'libmp3lame',
+            '-ab', '128k',
+            'pipe:1'
+        ]
+        
+        ytdlp_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        try:
+            while True:
+                chunk = ffmpeg_process.stdout.read(4096)
+                if not chunk:
+                    # Check if either process failed
+                    if ffmpeg_process.poll() is not None and ffmpeg_process.returncode != 0:
+                        stderr = ffmpeg_process.stderr.read().decode()
+                        print(f"FFmpeg error: {stderr}")
+                    if ytdlp_process.poll() is not None and ytdlp_process.returncode != 0:
+                        stderr = ytdlp_process.stderr.read().decode()
+                        print(f"yt-dlp error: {stderr}")
+                    break
+                yield chunk
+        except Exception as e:
+            print(f"Streaming error: {e}")
+        finally:
+            ffmpeg_process.terminate()
+            ytdlp_process.terminate()
+            try:
+                ffmpeg_process.wait(timeout=2)
+                ytdlp_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                ffmpeg_process.kill()
+                ytdlp_process.kill()
 
-        stream_process = subprocess.Popen(
-            command,
-            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)
-        )
+    return Response(generate(), mimetype="audio/mpeg")
 
-def stop_stream():
-    global stream_process
-
-    with lock:
-        if stream_process and stream_process.poll() is None:
-            print("Stopping current stream.")
-            stream_process.terminate()
-            stream_process.wait()
-            stream_process = None
-
-@app.route('/control', methods=['GET'])
-def control_stream():
-    action = request.args.get('action')
-    video_id = request.args.get('stream')
-    stream_type = request.args.get('type', 'video')
-
-    if action not in ['start', 'stop']:
-        return jsonify({'status': 'error', 'message': 'Invalid action.'}), 400
-
-    if action == 'start':
-        if not video_id:
-            return jsonify({'status': 'error', 'message': 'Missing YouTube video ID.'}), 400
-
-        threading.Thread(target=start_stream, args=(video_id, stream_type)).start()
-        return jsonify({'status': 'ok', 'message': f'Started {stream_type} stream: {video_id}'})
-
-    elif action == 'stop':
-        threading.Thread(target=stop_stream).start()
-        return jsonify({'status': 'ok', 'message': 'Stopped current stream.'})
-
-@app.route('/ping', methods=['GET'])
+@app.route('/ping')
 def ping():
     return jsonify({'status': 'ok', 'message': 'pong'})
 

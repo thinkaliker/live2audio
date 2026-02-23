@@ -1,21 +1,14 @@
 FROM python:3.11-slim
 
 RUN apt-get update && \
-    apt-get install -y ffmpeg yt-dlp icecast2 && \
+    apt-get install -y ffmpeg curl python3-pip && \
     rm -rf /var/lib/apt/lists/*
-
-COPY icecast.xml /etc/icecast2/icecast.xml
 
 WORKDIR /app
 COPY stream_manager.py .
 
-RUN pip install flask
+RUN pip install --no-cache-dir flask yt-dlp
 
-EXPOSE 8000 5000
+EXPOSE 5000
 
-ENV ICECAST_URL="icecast://source:hackme@localhost:8000/stream"
-
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-CMD ["/entrypoint.sh"]
+CMD ["python", "stream_manager.py"]
