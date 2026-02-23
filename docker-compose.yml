@@ -1,19 +1,19 @@
 services:
   live2audio:
-    build: .
+    image: ghcr.io/thinkaliker/live2audio:latest
     container_name: live2audio
     ports:
       - "5000:5000"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/ping"]
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/ping" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
 
   watchtower:
-    image: containrrr/watchtower
+    image: nickfedor/watchtower:latest
     container_name: watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
