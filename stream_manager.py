@@ -266,8 +266,13 @@ def stream_audio():
     if not video_id:
         return "Missing video ID", 400
     
-    # Update "Recently Played"
-    station_name = VIDEO_ID_MAP.get(video_id, f"ID: {video_id}")
+    # Update "Recently Played" with name lookup
+    station_name = VIDEO_ID_MAP.get(video_id)
+    if not station_name:
+        # Try one refresh if name is unknown
+        get_available_streams()
+        station_name = VIDEO_ID_MAP.get(video_id, f"ID: {video_id}")
+
     with LOG_LOCK:
         LAST_STREAM["name"] = station_name
         LAST_STREAM["time"] = datetime.now().strftime('%H:%M:%S')
@@ -360,4 +365,9 @@ def ping():
     return jsonify({'status': 'ok', 'message': 'pong'})
 
 if __name__ == '__main__':
+    # Pre-populate map when running locally
+    get_available_streams()
     app.run(host='0.0.0.0', port=5000)
+else:
+    # Pre-populate map when running under Gunicorn
+    get_available_streams()
