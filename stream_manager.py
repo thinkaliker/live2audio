@@ -199,9 +199,10 @@ def index():
             }
             .stream-item {
                 display: flex;
+                flex-wrap: wrap;
                 align-items: center;
                 background: rgba(255, 255, 255, 0.03);
-                padding: 10px 15px;
+                padding: 15px;
                 border-radius: 12px;
                 transition: all 0.2s;
             }
@@ -217,13 +218,17 @@ def index():
                 object-fit: cover;
             }
             .stream-info {
-                flex-grow: 1;
+                flex: 1;
                 display: flex;
                 flex-direction: column;
             }
             .stream-actions {
+                width: 100%;
                 display: flex;
                 gap: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid rgba(255, 255, 255, 0.05);
             }
             .action-link {
                 background: rgba(255, 255, 255, 0.05);
