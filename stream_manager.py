@@ -1,6 +1,7 @@
 import subprocess
 import os
 import time
+import threading
 from datetime import datetime, timedelta
 from collections import deque
 from flask import Flask, Response, request, jsonify, redirect, render_template_string
@@ -10,6 +11,7 @@ app = Flask(__name__)
 # Server metadata
 START_TIME = datetime.now()
 ERROR_LOG = deque(maxlen=10)
+LOG_LOCK = threading.Lock()
 LAST_STREAM = {"name": "None", "time": "Never"}
 VIDEO_ID_MAP = {}  # Map video_id to station name
 
@@ -17,9 +19,11 @@ def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
 def get_available_streams():
+    global VIDEO_ID_MAP
     streams = []
+    temp_map = {}
     m3u_path = "youtube.m3u"
-    VIDEO_ID_MAP.clear()
+    
     if os.path.exists(m3u_path):
         try:
             with open(m3u_path, 'r') as f:
@@ -32,20 +36,23 @@ def get_available_streams():
                         name = info.split(',')[-1].strip()
                         
                         # Extract video ID from URL
-                        # Example: http://localhost:5000/stream.mp3?v=jfKfPfyJRdk
                         vid_id = "Unknown"
                         if "?v=" in url_line:
                             vid_id = url_line.split("?v=")[1].split("&")[0]
                         
-                        VIDEO_ID_MAP[vid_id] = name
+                        temp_map[vid_id] = name
                         
                         # Extract logo
                         logo = ""
                         if 'tvg-logo="' in info:
                             logo = info.split('tvg-logo="')[1].split('"')[0]
                         streams.append({"name": name, "url": url_line, "logo": logo})
+            
+            # Atomic update of the global map to prevent race conditions
+            VIDEO_ID_MAP = temp_map
         except Exception as e:
-            ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - M3U Parse Error: {str(e)}")
+            with LOG_LOCK:
+                ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - M3U Parse Error: {str(e)}")
     return streams
 
 @app.before_request
@@ -55,7 +62,8 @@ def log_request():
 @app.errorhandler(404)
 def page_not_found(e):
     print(f"404 ERROR: {request.path}", flush=True)
-    ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - 404: {request.path}")
+    with LOG_LOCK:
+        ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - 404: {request.path}")
     return "Not Found", 404
 
 @app.route('/')
@@ -260,8 +268,9 @@ def stream_audio():
     
     # Update "Recently Played"
     station_name = VIDEO_ID_MAP.get(video_id, f"ID: {video_id}")
-    LAST_STREAM["name"] = station_name
-    LAST_STREAM["time"] = datetime.now().strftime('%H:%M:%S')
+    with LOG_LOCK:
+        LAST_STREAM["name"] = station_name
+        LAST_STREAM["time"] = datetime.now().strftime('%H:%M:%S')
 
     # Simple HEAD support
     if request.method == 'HEAD':
@@ -281,7 +290,8 @@ def stream_audio():
             
             if url_proc.returncode != 0:
                 print(f"yt-dlp error: {url_proc.stderr}", flush=True)
-                ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - yt-dlp Error: {video_id}")
+                with LOG_LOCK:
+                    ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - yt-dlp Error: {video_id}")
                 return
 
             direct_url = url_proc.stdout.strip()
@@ -316,7 +326,8 @@ def stream_audio():
                 
         except Exception as e:
             print(f"Error: {e}", flush=True)
-            ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - Stream Error: {str(e)[:50]}")
+            with LOG_LOCK:
+                ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - Stream Error: {str(e)[:50]}")
         finally:
             print(f"Cleaning up {video_id}", flush=True)
             if ffmpeg_process: # Check if ffmpeg_process was successfully created
