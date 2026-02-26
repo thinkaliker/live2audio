@@ -15,6 +15,18 @@ LOG_LOCK = threading.Lock()
 LAST_STREAM = {"name": "None", "time": "Never"}
 VIDEO_ID_MAP = {}  # Map video_id to station name
 
+CACHE_DIR = "cache"
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+def cache_thumbnail(video_id):
+    """Download thumbnail to local cache if it doesn't exist."""
+    cache_path = os.path.join(CACHE_DIR, f"{video_id}.jpg")
+    if not os.path.exists(cache_path):
+        print(f"Background caching thumbnail for {video_id}...", flush=True)
+        url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+        subprocess.run(['curl', '-s', '-L', '-o', cache_path, url])
+
 def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
@@ -42,11 +54,12 @@ def get_available_streams():
                         
                         temp_map[vid_id] = name
                         
-                        # Extract logo
-                        logo = ""
-                        if 'tvg-logo="' in info:
-                            logo = info.split('tvg-logo="')[1].split('"')[0]
+                        # Always use local thumbnail proxy for dashboard to avoid localhost issues
+                        logo = f"/thumbnail.jpg?v={vid_id}"
                         streams.append({"name": name, "url": url_line, "logo": logo})
+                        
+                        # Cache in background
+                        threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
             
             # Atomic update of the global map to prevent race conditions
             VIDEO_ID_MAP = temp_map
@@ -65,6 +78,12 @@ def page_not_found(e):
     with LOG_LOCK:
         ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - 404: {request.path}")
     return "Not Found", 404
+
+@app.route('/refresh_m3u', methods=['POST'])
+def refresh_m3u():
+    print("Manual M3U refresh triggered...", flush=True)
+    get_available_streams()
+    return jsonify({"status": "success", "message": "Station list and thumbnails updated"})
 
 @app.route('/')
 def index():
@@ -110,6 +129,27 @@ def index():
             header {
                 text-align: center;
                 margin-bottom: 40px;
+                position: relative;
+            }
+            .refresh-btn {
+                position: absolute;
+                right: 0;
+                top: 0;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: #94a3b8;
+                padding: 8px 16px;
+                border-radius: 12px;
+                cursor: pointer;
+                font-size: 0.75rem;
+                transition: all 0.2s;
+            }
+            .refresh-btn:hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--text);
+            }
+            .refresh-btn:active {
+                transform: scale(0.95);
             }
             h1 {
                 font-size: 2.5rem;
@@ -199,6 +239,7 @@ def index():
     <body>
         <div class="container">
             <header>
+                <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh List</button>
                 <h1>Live2Audio</h1>
                 <p style="color: #94a3b8">Premium YouTube-to-Jellyfin Audio Streamer</p>
                 <span class="badge badge-success">● SYSTEM ONLINE</span>
@@ -248,6 +289,34 @@ def index():
                 {% endif %}
             </section>
         </div>
+        <script>
+            async function refreshM3U() {
+                const btn = document.getElementById('refreshBtn');
+                const originalText = btn.innerText;
+                btn.innerText = '⌛ Refreshing...';
+                btn.disabled = true;
+                
+                try {
+                    const response = await fetch('/refresh_m3u', { method: 'POST' });
+                    if (response.ok) {
+                        btn.innerText = '✅ Updated';
+                        setTimeout(() => { location.reload(); }, 500);
+                    } else {
+                        btn.innerText = '❌ Error';
+                        setTimeout(() => { 
+                            btn.innerText = originalText;
+                            btn.disabled = false;
+                        }, 2000);
+                    }
+                } catch (e) {
+                    btn.innerText = '❌ Failed';
+                    setTimeout(() => { 
+                        btn.innerText = originalText;
+                        btn.disabled = false;
+                    }, 2000);
+                }
+            }
+        </script>
     </body>
     </html>
     """
@@ -356,8 +425,17 @@ def get_thumbnail():
     video_id = request.args.get('v')
     if not video_id:
         return "Missing video ID", 400
-    # Redirect to YouTube's high quality thumbnail
-    return redirect(f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg")
+    
+    # Check cache first
+    cache_path = os.path.join(CACHE_DIR, f"{video_id}.jpg")
+    if not os.path.exists(cache_path):
+        print(f"Caching thumbnail for {video_id}...", flush=True)
+        url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+        # Download using curl
+        subprocess.run(['curl', '-s', '-L', '-o', cache_path, url])
+        
+    from flask import send_from_directory
+    return send_from_directory(CACHE_DIR, f"{video_id}.jpg")
 
 @app.route('/ping')
 def ping():
