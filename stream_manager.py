@@ -435,7 +435,9 @@ def get_thumbnail():
         subprocess.run(['curl', '-s', '-L', '-o', cache_path, url])
         
     from flask import send_from_directory
-    return send_from_directory(CACHE_DIR, f"{video_id}.jpg")
+    response = send_from_directory(CACHE_DIR, f"{video_id}.jpg")
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 @app.route('/ping')
 def ping():
