@@ -56,7 +56,7 @@ def get_available_streams():
                         
                         # Always use local thumbnail proxy for dashboard to avoid localhost issues
                         logo = f"/thumbnail.jpg?v={vid_id}"
-                        streams.append({"name": name, "url": url_line, "logo": logo})
+                        streams.append({"name": name, "url": url_line, "logo": logo, "id": vid_id})
                         
                         # Cache in background
                         threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
@@ -210,11 +210,36 @@ def index():
                 transform: translateY(-2px);
             }
             .stream-logo {
-                width: 40px;
-                height: 40px;
+                width: 44px;
+                height: 44px;
                 border-radius: 8px;
                 margin-right: 12px;
                 object-fit: cover;
+            }
+            .stream-info {
+                flex-grow: 1;
+                display: flex;
+                flex-direction: column;
+            }
+            .stream-actions {
+                display: flex;
+                gap: 8px;
+            }
+            .action-link {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: #94a3b8;
+                padding: 6px 10px;
+                border-radius: 8px;
+                font-size: 0.7rem;
+                text-decoration: none;
+                transition: all 0.2s;
+                white-space: nowrap;
+            }
+            .action-link:hover {
+                background: rgba(255, 255, 255, 0.12);
+                color: var(--text);
+                border-color: var(--primary);
             }
             .error-log {
                 background: rgba(239, 68, 68, 0.05);
@@ -267,7 +292,14 @@ def index():
                         {% else %}
                         <div class="stream-logo" style="background:#334155"></div>
                         {% endif %}
-                        <span>{{ stream.name }}</span>
+                        <div class="stream-info">
+                            <span style="font-weight: 500;">{{ stream.name }}</span>
+                            <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }}</span>
+                        </div>
+                        <div class="stream-actions">
+                            <a href="/stream.mp3?v={{ stream.id }}" class="action-link" target="_blank">♫ MP3</a>
+                            <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YouTube</a>
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
