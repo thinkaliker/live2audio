@@ -1,0 +1,30 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=jfKfPfyJRdk" group-title="YouTube Radio", Lofi Girl Radio
+http://localhost:5000/stream.mp3?v=jfKfPfyJRdk
+#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=4xDzrJKXOOY" group-title="YouTube Radio", Lofi Girl Synthwave Radio
+http://localhost:5000/stream.mp3?v=4xDzrJKXOOY
+
+#EXTINF:-1 tvg-id="Chillhop" tvg-logo="http://localhost:5000/thumbnail.jpg?v=5yx6BWlEVcY" group-title="YouTube Radio", Chillhop Radio
+http://localhost:5000/stream.mp3?v=5yx6BWlEVcY
+#EXTINF:-1 tvg-id="Chillhop" tvg-logo="http://localhost:5000/thumbnail.jpg?v=i6WzngxTnBA" group-title="YouTube Radio", Chillhop Late Night Radio
+http://localhost:5000/stream.mp3?v=i6WzngxTnBA
+#EXTINF:-1 tvg-id="Chillhop" tvg-logo="http://localhost:5000/thumbnail.jpg?v=7NOSDKb0HlU" group-title="YouTube Radio", Chillhop Study Radio
+http://localhost:5000/stream.mp3?v=7NOSDKb0HlU
+
+
+#EXTINF:-1 tvg-id="Monstercat" tvg-logo="http://localhost:5000/thumbnail.jpg?v=WsDyRAPFBC8" group-title="YouTube Radio", Silk Deep House Radio
+http://localhost:5000/stream.mp3?v=WsDyRAPFBC8
+#EXTINF:-1 tvg-id="Monstercat" tvg-logo="http://localhost:5000/thumbnail.jpg?v=d8Oc90QevaI" group-title="YouTube Radio", Silk Progressive House Radio
+http://localhost:5000/stream.mp3?v=d8Oc90QevaI
+
+#EXTINF:-1 tvg-id="Nightride" tvg-logo="http://localhost:5000/thumbnail.jpg?v=UedTcufyrHc" group-title="YouTube Radio", ChillSynth FM Radio
+http://localhost:5000/stream.mp3?v=UedTcufyrHc
+#EXTINF:-1 tvg-id="Nightride" tvg-logo="http://localhost:5000/thumbnail.jpg?v=5-anTj1QrW" group-title="YouTube Radio", Spacesynth FM Radio
+http://localhost:5000/stream.mp3?v=5-anTj1QrW
+#EXTINF:-1 tvg-id="Nightride" tvg-logo="http://localhost:5000/thumbnail.jpg?v=Y9q6RYg2Pdg" group-title="YouTube Radio", Datawave FM Radio
+http://localhost:5000/stream.mp3?v=Y9q6RYg2Pdg
+#EXTINF:-1 tvg-id="Nightride" tvg-logo="http://localhost:5000/thumbnail.jpg?v=uYfxDF_QR94" group-title="YouTube Radio", Nightride FM Radio
+http://localhost:5000/stream.mp3?v=uYfxDF_QR94
+
+#EXTINF:-1 tvg-id="Deadmau5" tvg-logo="http://localhost:5000/thumbnail.jpg?v=edqlOxtnvL0" group-title="YouTube Radio", Deadmau5 Radio
+http://localhost:5000/stream.mp3?v=edqlOxtnvL0

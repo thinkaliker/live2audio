@@ -1,5 +1,5 @@
 import subprocess
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, request, jsonify, redirect
 
 app = Flask(__name__)
 
@@ -95,6 +95,14 @@ def stream_audio():
             'Access-Control-Allow-Origin': '*'
         }
     )
+
+@app.route('/thumbnail.jpg')
+def get_thumbnail():
+    video_id = request.args.get('v')
+    if not video_id:
+        return "Missing video ID", 400
+    # Redirect to YouTube's high quality thumbnail
+    return redirect(f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg")
 
 @app.route('/ping')
 def ping():

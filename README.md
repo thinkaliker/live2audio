@@ -23,9 +23,9 @@ Create a file called `youtube.m3u` and add your favorite streams. For Jellyfin, 
 
 ```text
 #EXTM3U
-#EXTINF:-1 tvg-id="LofiGirl" group-title="YouTube Radio", Lofi Girl - Radio
+#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://YOUR_SERVER_IP:5000/thumbnail.jpg?v=jfKfPfyJRdk" group-title="YouTube Radio", Lofi Girl - Radio
 http://YOUR_SERVER_IP:5000/stream.mp3?v=jfKfPfyJRdk
-#EXTINF:-1 tvg-id="Synthwave" group-title="YouTube Radio", Synthwave Radio
+#EXTINF:-1 tvg-id="Synthwave" tvg-logo="http://YOUR_SERVER_IP:5000/thumbnail.jpg?v=4xDzrJKXOOY" group-title="YouTube Radio", Synthwave Radio
 http://YOUR_SERVER_IP:5000/stream.mp3?v=4xDzrJKXOOY
 ```
 
