@@ -207,11 +207,7 @@ def index():
             <div class="stats-grid">
                 <div class="stat-card">
                     <span class="stat-value">{{ uptime }}</span>
-                    <span class="stat-label">Uptime</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value">{{ stream_count }}</span>
-                    <span class="stat-label">Total Stations</span>
+                    <span class="stat-label">System Uptime</span>
                 </div>
                 <div class="stat-card">
                     <span class="stat-value" style="font-size: 1.1rem;">{{ last_stream_name }}</span>
@@ -220,7 +216,8 @@ def index():
             </div>
 
             <section>
-                <h2>Configured Stations (M3U)</h2>
+                <h2>Station List Configuration</h2>
+                {% if streams %}
                 <div class="stream-list">
                     {% for stream in streams %}
                     <div class="stream-item">
@@ -233,6 +230,9 @@ def index():
                     </div>
                     {% endfor %}
                 </div>
+                {% else %}
+                <p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>
+                {% endif %}
             </section>
 
             <section>
@@ -254,7 +254,6 @@ def index():
     return render_template_string(
         html, 
         uptime=uptime, 
-        stream_count=len(streams), 
         streams=streams, 
         errors=list(ERROR_LOG),
         last_stream_name=LAST_STREAM["name"]

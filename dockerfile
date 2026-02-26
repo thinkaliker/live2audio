@@ -7,6 +7,7 @@ RUN apk add --no-cache ffmpeg curl nodejs && \
 
 WORKDIR /app
 COPY stream_manager.py .
+COPY youtube.m3u .
 
 EXPOSE 5000
 
