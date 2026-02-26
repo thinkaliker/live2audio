@@ -36,9 +36,9 @@ def stream_audio():
         ffmpeg_process = None # Initialize ffmpeg_process outside try block
         try:
             # 1. Get the direct audio URL from YouTube
-            # This is much more stable than piping binary data through stdout
-            print(f"Fetching audio URL for {video_id}...", flush=True)
-            url_command = ['yt-dlp', '-g', '-f', 'bestaudio', youtube_url]
+            # Using 'ba/b' as a robust fallback for "format not available" errors
+            print(f"Fetching audio URL for {video_id} with format 'ba/b'...", flush=True)
+            url_command = ['yt-dlp', '-g', '-f', 'ba/b', youtube_url]
             url_proc = subprocess.run(url_command, capture_output=True, text=True)
             
             if url_proc.returncode != 0:

@@ -1,13 +1,8 @@
-# Get the Deno binary from official image
-FROM denoland/deno:alpine AS deno-bin
-
 FROM python:3.11-alpine
 
-# Copy Deno binary
-COPY --from=deno-bin /usr/bin/deno /usr/bin/deno
-
 # Combine package installation and pip cleanup
-RUN apk add --no-cache ffmpeg curl && \
+# nodejs is used as the JavaScript runtime for yt-dlp
+RUN apk add --no-cache ffmpeg curl nodejs && \
     pip install --no-cache-dir flask yt-dlp
 
 WORKDIR /app
