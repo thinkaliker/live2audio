@@ -9,8 +9,9 @@ app = Flask(__name__)
 
 # Server metadata
 START_TIME = datetime.now()
-ERROR_LOG = deque(maxlen=10)  # Store last 10 errors
-LAST_STREAM = {"id": "None", "time": "Never"}
+ERROR_LOG = deque(maxlen=10)
+LAST_STREAM = {"name": "None", "time": "Never"}
+VIDEO_ID_MAP = {}  # Map video_id to station name
 
 def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
@@ -18,6 +19,7 @@ def build_youtube_url(video_id):
 def get_available_streams():
     streams = []
     m3u_path = "youtube.m3u"
+    VIDEO_ID_MAP.clear()
     if os.path.exists(m3u_path):
         try:
             with open(m3u_path, 'r') as f:
@@ -26,13 +28,22 @@ def get_available_streams():
                 for i in range(len(lines)):
                     if lines[i].startswith('#EXTINF:'):
                         info = lines[i]
-                        url = lines[i+1] if i+1 < len(lines) else ""
+                        url_line = lines[i+1].strip() if i+1 < len(lines) else ""
                         name = info.split(',')[-1].strip()
-                        # Extract logo if present
+                        
+                        # Extract video ID from URL
+                        # Example: http://localhost:5000/stream.mp3?v=jfKfPfyJRdk
+                        vid_id = "Unknown"
+                        if "?v=" in url_line:
+                            vid_id = url_line.split("?v=")[1].split("&")[0]
+                        
+                        VIDEO_ID_MAP[vid_id] = name
+                        
+                        # Extract logo
                         logo = ""
                         if 'tvg-logo="' in info:
                             logo = info.split('tvg-logo="')[1].split('"')[0]
-                        streams.append({"name": name, "url": url, "logo": logo})
+                        streams.append({"name": name, "url": url_line, "logo": logo})
         except Exception as e:
             ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - M3U Parse Error: {str(e)}")
     return streams
@@ -58,6 +69,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="refresh" content="30">
         <title>Live2Audio Dashboard</title>
         <style>
             :root {
@@ -191,16 +203,16 @@ def index():
                 </div>
                 <div class="stat-card">
                     <span class="stat-value">{{ stream_count }}</span>
-                    <span class="stat-label">Managed Streams</span>
+                    <span class="stat-label">Total Stations</span>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-value">{{ last_stream_id }}</span>
-                    <span class="stat-label">Last Requested</span>
+                    <span class="stat-value" style="font-size: 1.1rem;">{{ last_stream_name }}</span>
+                    <span class="stat-label">Recently Played</span>
                 </div>
             </div>
 
             <section>
-                <h2>Active Streams (M3U)</h2>
+                <h2>Configured Stations (M3U)</h2>
                 <div class="stream-list">
                     {% for stream in streams %}
                     <div class="stream-item">
@@ -216,7 +228,7 @@ def index():
             </section>
 
             <section>
-                <h2>Recent Errors</h2>
+                <h2>Recent Session Errors</h2>
                 {% if errors %}
                 <div class="error-log">
                     {% for error in errors %}
@@ -237,7 +249,7 @@ def index():
         stream_count=len(streams), 
         streams=streams, 
         errors=list(ERROR_LOG),
-        last_stream_id=LAST_STREAM["id"]
+        last_stream_name=LAST_STREAM["name"]
     )
 
 @app.route('/stream.mp3', methods=['GET', 'HEAD'])
@@ -246,8 +258,9 @@ def stream_audio():
     if not video_id:
         return "Missing video ID", 400
     
-    # Track statistics
-    LAST_STREAM["id"] = video_id
+    # Update "Recently Played"
+    station_name = VIDEO_ID_MAP.get(video_id, f"ID: {video_id}")
+    LAST_STREAM["name"] = station_name
     LAST_STREAM["time"] = datetime.now().strftime('%H:%M:%S')
 
     # Simple HEAD support
