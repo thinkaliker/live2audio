@@ -40,6 +40,7 @@ def get_available_streams():
     
     if os.path.exists(m3u_path):
         try:
+            import re
             with open(m3u_path, 'r') as f:
                 content = f.read()
                 lines = content.split('\n')
@@ -49,10 +50,19 @@ def get_available_streams():
                         url_line = lines[i+1].strip() if i+1 < len(lines) else ""
                         name = info.split(',')[-1].strip()
                         
+                        # Extract metadata using regex
+                        tvg_id_match = re.search(r'tvg-id="([^"]*)"', info)
+                        group_match = re.search(r'group-title="([^"]*)"', info)
+                        
+                        tvg_id = tvg_id_match.group(1) if tvg_id_match else "Manual"
+                        group = group_match.group(1) if group_match else "YouTube Radio"
+
                         # Extract video ID from URL
                         vid_id = "Unknown"
                         if "?v=" in url_line:
                             vid_id = url_line.split("?v=")[1].split("&")[0]
+                        elif "youtu.be/" in url_line:
+                            vid_id = url_line.split("youtu.be/")[1].split("?")[0]
                         
                         temp_map[vid_id] = name
                         
@@ -65,6 +75,8 @@ def get_available_streams():
                             "url": url_line, 
                             "logo": logo, 
                             "id": vid_id,
+                            "tvg_id": tvg_id,
+                            "group": group,
                             "listeners": listeners
                         })
                         
@@ -142,6 +154,66 @@ def add_station():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/edit_station', methods=['POST'])
+def edit_station():
+    data = request.json
+    old_url = data.get('old_url', '').strip()
+    new_url = data.get('url', '').strip()
+    new_name = data.get('name', '').strip()
+    new_tvg_id = data.get('id', 'Manual').strip()
+    new_group = data.get('group', 'YouTube Radio').strip()
+
+    if not old_url or not new_url or not new_name:
+        return jsonify({"status": "error", "message": "Original URL, New URL, and Name are required"}), 400
+
+    # Extract new video ID
+    new_vid_id = None
+    if "?v=" in new_url:
+        new_vid_id = new_url.split("?v=")[1].split("&")[0]
+    elif "youtu.be/" in new_url:
+        new_vid_id = new_url.split("youtu.be/")[1].split("?")[0]
+    else:
+        new_vid_id = new_url
+
+    # Construct new stream URL
+    # Use lowercase localhost to match what's already in the file or just use relative if possible? 
+    # The existing code uses http://localhost:5000/stream.mp3?v=...
+    new_stream_url = f"http://localhost:5000/stream.mp3?v={new_vid_id}"
+
+    m3u_path = "youtube.m3u"
+    try:
+        with open(m3u_path, 'r') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        i = 0
+        found = False
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith('#EXTINF:'):
+                next_line = lines[i+1].strip() if i+1 < len(lines) else ""
+                # Check if this is the station we want to edit by matching the old stream URL
+                if next_line == old_url:
+                    found = True
+                    # Update this entry
+                    new_lines.append(f'#EXTINF:-1 tvg-id="{new_tvg_id}" tvg-logo="http://localhost:5000/thumbnail.jpg?v={new_vid_id}" group-title="{new_group}", {new_name}\n')
+                    new_lines.append(f'{new_stream_url}\n')
+                    i += 2
+                    continue
+            new_lines.append(line)
+            i += 1
+
+        if not found:
+            return jsonify({"status": "error", "message": "Original station not found"}), 404
+
+        with open(m3u_path, 'w') as f:
+            f.writelines(new_lines)
+
+        get_available_streams()
+        return jsonify({"status": "success", "message": f"Updated {new_name}"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/api/stats')
 def api_stats():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
@@ -171,13 +243,14 @@ def index():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Live2Audio Dashboard</title>
+        <link rel="icon" id="dynamic-favicon" href="/favicon_base.png">
         <style>
             :root {
-                --primary: #6366f1;
-                --bg: #0f172a;
-                --card: #1e293b;
-                --text: #f8fafc;
-                --border: rgba(255, 255, 255, 0.1);
+                --primary: #94a3b8;
+                --bg: #020617;
+                --card: #0f172a;
+                --text: #f1f5f9;
+                --border: rgba(255, 255, 255, 0.08);
             }
             body {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -191,23 +264,44 @@ def index():
                 padding: 20px;
             }
             .container {
-                max-width: 900px;
+                max-width: 1000px;
                 width: 100%;
                 background: var(--card);
                 border: 1px solid var(--border);
                 border-radius: 20px;
-                padding: 40px;
+                padding: 30px;
                 box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
             }
             header {
-                text-align: center;
-                margin-bottom: 40px;
-                position: relative;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 20px;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }
+            .header-left {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            .header-center {
+                display: flex;
+                align-items: center;
+                gap: 20px;
+                background: rgba(0, 0, 0, 0.2);
+                padding: 8px 20px;
+                border-radius: 100px;
+                border: 1px solid var(--border);
+            }
+            .header-right {
+                display: flex;
+                align-items: center;
+                gap: 10px;
             }
             .refresh-btn {
-                position: absolute;
-                right: 0;
-                top: 0;
                 background: rgba(255, 255, 255, 0.05);
                 border: 1px solid var(--border);
                 color: #94a3b8;
@@ -225,7 +319,6 @@ def index():
                 color: var(--text);
             }
             .add-btn {
-                right: 120px;
                 background: var(--primary);
                 color: white;
                 border: none;
@@ -233,13 +326,52 @@ def index():
             .add-btn:hover {
                 filter: brightness(1.2);
             }
-            .refresh-btn:active {
-                transform: scale(0.95);
+            .error-btn {
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.2);
+                color: #ef4444;
+            }
+            .error-btn:hover {
+                background: rgba(239, 68, 68, 0.2);
+                color: #fca5a5;
+            }
+            .error-list-modal {
+                max-height: 300px;
+                overflow-y: auto;
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 12px;
+                padding: 15px;
+                font-family: monospace;
+                font-size: 0.8rem;
+                color: #fca5a5;
+                margin-top: 15px;
+            }
+            .error-list-modal div {
+                padding: 4px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             }
             h1 {
-                font-size: 2.2rem;
+                font-size: 1.5rem;
                 margin: 0;
                 color: var(--primary);
+                white-space: nowrap;
+            }
+            .mini-stat {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                min-width: 80px;
+            }
+            .mini-stat-value {
+                font-size: 0.9rem;
+                font-weight: 600;
+                color: var(--text);
+            }
+            .mini-stat-label {
+                font-size: 0.65rem;
+                color: #64748b;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
             }
             /* Modal Styles */
             .modal-overlay {
@@ -310,9 +442,7 @@ def index():
                 display: none;
             }
             audio {
-                width: 100%;
-                height: 32px;
-                filter: invert(100%) hue-rotate(180deg) brightness(1.5);
+                display: none;
             }
             .stat-card {
                 background: rgba(255, 255, 255, 0.03);
@@ -481,31 +611,72 @@ def index():
                 background: rgba(239, 68, 68, 0.3) !important;
                 color: white !important;
             }
+
+            /* Volume Slider Styles */
+            .volume-container {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 0 16px;
+                min-width: 120px;
+            }
+            .volume-slider {
+                -webkit-appearance: none;
+                width: 100%;
+                height: 4px;
+                border-radius: 2px;
+                background: rgba(255, 255, 255, 0.1);
+                outline: none;
+            }
+            .volume-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: var(--primary);
+                cursor: pointer;
+                border: none;
+            }
+            .volume-slider::-moz-range-thumb {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: var(--primary);
+                cursor: pointer;
+                border: none;
+            }
+            .volume-icon {
+                color: #94a3b8;
+                font-size: 0.8rem;
+            }
         </style>
     </head>
     <body>
         <div class="container">
             <header>
-                <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
-                <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh List</button>
-                <h1>Live2Audio</h1>
-                <span class="badge badge-success" id="system-status-badge">● SYSTEM ONLINE</span>
-            </header>
+                <div class="header-left">
+                    <h1>Live2Audio</h1>
+                    <span class="badge badge-success" id="system-status-badge">● ONLINE</span>
+                </div>
+                
+                <div class="header-center">
+                    <div class="mini-stat">
+                        <span class="mini-stat-value" id="uptime-val">{{ uptime }}</span>
+                        <span class="mini-stat-label">Uptime</span>
+                    </div>
+                    <div class="mini-stat">
+                        <span class="mini-stat-value" id="live-count-val">{{ live_count }}</span>
+                        <span class="mini-stat-label">Live</span>
+                    </div>
+                </div>
 
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <span class="stat-value" id="uptime-val">{{ uptime }}</span>
-                    <span class="stat-label">System Uptime</span>
+                <div class="header-right">
+                    <button class="refresh-btn error-btn" onclick="openErrorModal()" id="errorBtn" style="display: {% if errors %}flex{% else %}none{% endif %};">⚠ Errors</button>
+                    <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
+                    <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh</button>
                 </div>
-                <div class="stat-card">
-                    <span class="stat-value" id="live-count-val">{{ live_count }}</span>
-                    <span class="stat-label">Live Stations</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value" id="recently-played-val" style="font-size: 1.1rem;">{{ last_stream_name }}</span>
-                    <span class="stat-label">Recently Played</span>
-                </div>
-            </div>
+            </header>
 
             <section>
                 <h2>Station List Configuration</h2>
@@ -527,14 +698,10 @@ def index():
                                 <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }} {% if stream.listeners > 0 %}• {{ stream.listeners }} listening{% endif %}</span>
                             </div>
                             <div class="stream-actions">
-                                <button class="action-link" onclick="togglePlayer('player-{{ stream.id }}')">▶ Play</button>
-                                <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v={{ stream.id }}')">📋 Copy Link</button>
-                                <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YouTube</a>
-                            </div>
-                            <div class="player-container" id="player-{{ stream.id }}">
-                                <audio controls preload="none">
-                                    <source src="/stream.mp3?v={{ stream.id }}" type="audio/mpeg">
-                                </audio>
+                                <button class="action-link" id="play-btn-{{ stream.id }}" onclick="togglePlayer('{{ stream.id }}')">▶ Play</button>
+                                <button class="action-link" onclick="openEditModal('{{ stream.id }}', '{{ stream.name }}', '{{ stream.url }}', '{{ stream.group }}', '{{ stream.tvg_id }}')">✎ Edit</button>
+                                <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v={{ stream.id }}')">📋 Copy</button>
+                                <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YT</a>
                             </div>
                         </div>
                         {% endfor %}
@@ -545,24 +712,11 @@ def index():
                 </div>
             </section>
 
-            <section>
-                <h2>Recent Session Errors</h2>
-                <div id="error-log-container">
-                    {% if errors %}
-                    <div class="error-log">
-                        {% for error in errors %}
-                        <div>{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p style="color: #64748b; font-style: italic;">No errors reported in this session.</p>
-                    {% endif %}
-                </div>
-            </section>
         </div>
 
         <!-- Playback Bar -->
         <div id="playback-bar" class="playback-bar">
+            <audio id="main-audio" preload="none"></audio>
             <div class="playback-content">
                 <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='#334155'">
                 <div class="playback-info-text">
@@ -570,13 +724,18 @@ def index():
                     <span class="playback-status">Currently Playing</span>
                 </div>
             </div>
+            <div class="volume-container">
+                <span class="volume-icon">Vol</span>
+                <input type="range" class="volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5">
+            </div>
             <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
         </div>
 
-        <!-- Add Station Modal -->
+        <!-- Station Modal -->
         <div class="modal-overlay" id="modalOverlay">
             <div class="modal">
-                <h3>Add New Station</h3>
+                <h3 id="modalTitle">Add New Station</h3>
+                <input type="hidden" id="oldStationUrl">
                 <div class="form-group">
                     <label>YouTube URL or Video ID</label>
                     <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=...">
@@ -595,7 +754,20 @@ def index():
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button class="btn btn-primary" onclick="submitStation()" id="submitBtn">Add Station</button>
+                    <button class="btn btn-primary" onclick="handleStationSubmit()" id="submitBtn">Save Station</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Modal -->
+        <div class="modal-overlay" id="errorModalOverlay">
+            <div class="modal">
+                <h3 style="color: #ef4444;">Session Error Log</h3>
+                <div id="error-log-container-modal" class="error-list-modal">
+                    <!-- Errors will be populated here -->
+                </div>
+                <div class="modal-actions" style="margin-top: 20px;">
+                    <button class="btn btn-secondary" onclick="closeErrorModal()">Close</button>
                 </div>
             </div>
         </div>
@@ -608,49 +780,107 @@ def index():
             }
 
             function stopAllAudio() {
-                document.querySelectorAll('audio').forEach(a => {
-                    a.pause();
-                    a.parentElement.style.display = 'none';
-                });
+                const audio = document.getElementById('main-audio');
+                audio.pause();
+                audio.src = "";
+                audio.load();
+                
                 document.getElementById('playback-bar').style.display = 'none';
                 sessionStorage.removeItem('isPlaying');
+                
+                // Reset all play buttons
+                document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+                    btn.innerText = "▶ Play";
+                });
+
+                // Update live count immediately
+                updateDashboard();
             }
 
             function togglePlayer(id) {
-                const p = document.getElementById(id);
-                const audio = p.querySelector('audio');
+                const audio = document.getElementById('main-audio');
                 const bar = document.getElementById('playback-bar');
+                const currentPlayingId = sessionStorage.getItem('isPlaying');
                 
-                if (p.style.display === 'block') {
-                    p.style.display = 'none';
-                    audio.pause();
-                    bar.style.display = 'none';
-                    sessionStorage.removeItem('isPlaying');
-                } else {
-                    // Stop any other playing audio
-                    document.querySelectorAll('audio').forEach(a => {
-                        if (a.parentElement.id !== id) {
-                            a.pause();
-                            a.parentElement.style.display = 'none';
-                        }
-                    });
-                    
-                    p.style.display = 'block';
-                    audio.play();
-                    sessionStorage.setItem('isPlaying', id);
-
-                    // Update and show playback bar
-                    const item = p.closest('.stream-item');
-                    const name = item.querySelector('.stream-info span[style*="font-weight: 500"]').innerText;
-                    const logo = item.querySelector('.stream-logo').src;
-                    
-                    document.getElementById('playback-station-name').innerText = name;
-                    document.getElementById('playback-logo').src = logo;
-                    bar.style.display = 'flex';
+                if (currentPlayingId === id) {
+                    // Stop if clicking the same one
+                    stopAllAudio();
+                    return;
                 }
+
+                // New station logic
+                audio.pause();
+                audio.src = `/stream.mp3?v=${id}`;
+                audio.play().catch(e => console.log("Play failed:", e));
+                sessionStorage.setItem('isPlaying', id);
+
+                // Update UI state
+                document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+                    btn.innerText = btn.id === `play-btn-${id}` ? "⏹ Stop" : "▶ Play";
+                });
+
+                // Update and show playback bar
+                const item = document.getElementById(`play-btn-${id}`).closest('.stream-item');
+                const name = item.querySelector('.stream-info span[style*="font-weight: 500"]').innerText;
+                const logo = item.querySelector('.stream-logo').src;
+                
+                document.getElementById('playback-station-name').innerText = name;
+                document.getElementById('playback-logo').src = logo;
+                bar.style.display = 'flex';
+
+                // Update live count immediately
+                updateDashboard();
             }
-            function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
-            function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
+
+            // Global volume control listener
+            document.addEventListener('DOMContentLoaded', () => {
+                const volControl = document.getElementById('volume-control');
+                volControl.addEventListener('input', (e) => {
+                    const vol = e.target.value;
+                    document.getElementById('main-audio').volume = vol;
+                    localStorage.setItem('userVolume', vol);
+                });
+
+                // Load saved volume
+                const savedVol = localStorage.getItem('userVolume');
+                if (savedVol !== null) {
+                    volControl.value = savedVol;
+                }
+
+                // Initial dashboard update
+                updateDashboard();
+            });
+            function openModal() {
+                document.getElementById('modalTitle').innerText = "Add New Station";
+                document.getElementById('oldStationUrl').value = "";
+                document.getElementById('stationUrl').value = "";
+                document.getElementById('stationName').value = "";
+                document.getElementById('stationId').value = "";
+                document.getElementById('stationGroup').value = "";
+                document.getElementById('modalOverlay').style.display = 'flex';
+            }
+
+            function openEditModal(id, name, url, group, tvg_id) {
+                document.getElementById('modalTitle').innerText = "Edit Station";
+                document.getElementById('oldStationUrl').value = url;
+                document.getElementById('stationUrl').value = url;
+                document.getElementById('stationName').value = name;
+                document.getElementById('stationId').value = tvg_id;
+                document.getElementById('stationGroup').value = group;
+                document.getElementById('modalOverlay').style.display = 'flex';
+            }
+
+            function closeModal() {
+                document.getElementById('modalOverlay').style.display = 'none';
+            }
+
+            function openErrorModal() {
+                document.getElementById('errorModalOverlay').style.display = 'flex';
+            }
+
+            function closeErrorModal() {
+                document.getElementById('errorModalOverlay').style.display = 'none';
+            }
 
             async function updateDashboard() {
                 const badge = document.getElementById('system-status-badge');
@@ -659,19 +889,21 @@ def index():
                     if (!response.ok) throw new Error('Offline');
                     const data = await response.json();
                     
-                    badge.innerText = '● SYSTEM ONLINE';
+                    badge.innerText = '● ONLINE';
                     badge.className = 'badge badge-success';
+                    
+                    // Update dynamic favicon badge
+                    updateFaviconBadge(data.live_count);
                     
                     document.getElementById('uptime-val').innerText = data.uptime;
                     document.getElementById('live-count-val').innerText = data.live_count;
-                    document.getElementById('recently-played-val').innerText = data.recently_played;
                     
-                    // Update streams without stopping audio
                     const container = document.getElementById('stream-list-container');
                     if (data.streams.length > 0) {
+                        const playingId = sessionStorage.getItem('isPlaying');
                         let html = '<div class="stream-list">';
                         data.streams.forEach(stream => {
-                            const isPlaying = document.getElementById(`player-${stream.id}`)?.style.display === 'block';
+                            const isThisPlaying = stream.id === playingId;
                             html += `
                             <div class="stream-item">
                                 <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='#334155'">
@@ -683,66 +915,33 @@ def index():
                                     <span style="font-size: 0.7rem; color: #64748b;">ID: ${stream.id} ${stream.listeners > 0 ? '• ' + stream.listeners + ' listening' : ''}</span>
                                 </div>
                                 <div class="stream-actions">
-                                    <button class="action-link" onclick="togglePlayer('player-${stream.id}')">▶ Play</button>
-                                    <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v=${stream.id}')">📋 Copy Link</button>
-                                    <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗ YouTube</a>
-                                </div>
-                                <div class="player-container" id="player-${stream.id}" style="${isPlaying ? 'display: block;' : ''}">
-                                    <audio controls preload="none">
-                                        <source src="/stream.mp3?v=${stream.id}" type="audio/mpeg">
-                                    </audio>
+                                    <button class="action-link" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${isThisPlaying ? '⏹ Stop' : '▶ Play'}</button>
+                                    <button class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎ Edit</button>
+                                    <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v=${stream.id}')">📋 Copy</button>
+                                    <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗ YT</a>
                                 </div>
                             </div>`;
                         });
                         html += '</div>';
-                        
-                        // To preserve audio playback, we should ideally only update the DOM elements that changed
-                        // or re-attach the audio element if it was playing.
-                        const activeAudio = document.querySelector('audio');
-                        const isActuallyPlaying = activeAudio && !activeAudio.paused;
-                        const playingId = isActuallyPlaying ? activeAudio.parentElement.id : null;
-                        const currentTime = activeAudio ? activeAudio.currentTime : 0;
-                        
-                        // Capture bar state
-                        const bar = document.getElementById('playback-bar');
-                        const barVisible = bar.style.display === 'flex';
-                        const barName = document.getElementById('playback-station-name').innerText;
-                        const barLogo = document.getElementById('playback-logo').src;
-
                         container.innerHTML = html;
-
-                        if (playingId) {
-                            const newContainer = document.getElementById(playingId);
-                            if (newContainer) {
-                                const newAudio = newContainer.querySelector('audio');
-                                newAudio.currentTime = currentTime;
-                                // Only resume if it was actually playing (not paused)
-                                newAudio.play().catch(e => console.log("Resume deferred:", e));
-                                
-                                // Restore bar
-                                document.getElementById('playback-station-name').innerText = barName;
-                                document.getElementById('playback-logo').src = barLogo;
-                                bar.style.display = 'flex';
-                            }
-                        } else if (!isActuallyPlaying) {
-                            // If nothing was playing, ensure the bar is hidden
-                            document.getElementById('playback-bar').style.display = 'none';
-                        }
                     } else {
                         container.innerHTML = '<p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>';
                     }
 
                     // Update errors
-                    const errorContainer = document.getElementById('error-log-container');
-                    if (data.errors.length > 0) {
-                        let errorHtml = '<div class="error-log">';
+                    const errorContainer = document.getElementById('error-log-container-modal');
+                    const errorBtn = document.getElementById('errorBtn');
+                    if (data.errors && data.errors.length > 0) {
+                        let errorHtml = '';
+                        // data.errors is deque(maxlen=10), so it's a list
                         data.errors.forEach(err => {
                             errorHtml += `<div>${err}</div>`;
                         });
-                        errorHtml += '</div>';
                         errorContainer.innerHTML = errorHtml;
+                        errorBtn.style.display = 'flex';
                     } else {
-                        errorContainer.innerHTML = '<p style="color: #64748b; font-style: italic;">No errors reported in this session.</p>';
+                        errorContainer.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">No errors reported in this session.</p>';
+                        errorBtn.style.display = 'none';
                     }
                 } catch (e) {
                     console.error("Dashboard update failed", e);
@@ -754,7 +953,8 @@ def index():
             // Update every 10 seconds
             setInterval(updateDashboard, 10000);
 
-            async function submitStation() {
+            async function handleStationSubmit() {
+                const oldUrl = document.getElementById('oldStationUrl').value;
                 const url = document.getElementById('stationUrl').value;
                 const name = document.getElementById('stationName').value;
                 const id = document.getElementById('stationId').value;
@@ -764,13 +964,17 @@ def index():
                 if (!url || !name) return alert('URL and Name are required');
 
                 btn.disabled = true;
-                btn.innerText = 'Adding...';
+                btn.innerText = 'Saving...';
+
+                const endpoint = oldUrl ? '/edit_station' : '/add_station';
+                const body = { url, name, id, group };
+                if (oldUrl) body.old_url = oldUrl;
 
                 try {
-                    const response = await fetch('/add_station', {
+                    const response = await fetch(endpoint, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url, name, id, group })
+                        body: JSON.stringify(body)
                     });
                     if (response.ok) {
                         closeModal();
@@ -780,10 +984,10 @@ def index():
                         alert('Error: ' + err.message);
                     }
                 } catch (e) {
-                    alert('Failed to connect to server');
+                    alert('Request failed');
                 } finally {
                     btn.disabled = false;
-                    btn.innerText = 'Add Station';
+                    btn.innerText = 'Save Station';
                 }
             }
 
@@ -816,6 +1020,36 @@ def index():
                         btn.disabled = false;
                     }, 2000);
                 }
+            }
+
+            function updateFaviconBadge(count) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 64;
+                canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                img.src = '/favicon_base.png';
+                img.onload = () => {
+                    ctx.clearRect(0, 0, 64, 64);
+                    ctx.drawImage(img, 0, 0, 64, 64);
+                    if (count > 0) {
+                        // Drawing the badge
+                        ctx.fillStyle = '#ef4444'; // Bright red for noticeability
+                        ctx.beginPath();
+                        ctx.arc(48, 16, 14, 0, 2 * Math.PI);
+                        ctx.fill();
+                        
+                        ctx.fillStyle = 'white';
+                        ctx.font = 'bold 18px Inter, system-ui, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(count, 48, 16);
+                    }
+                    const link = document.getElementById('dynamic-favicon');
+                    if (link) {
+                        link.href = canvas.toDataURL('image/png');
+                    }
+                };
             }
         </script>
     </body>
@@ -852,49 +1086,40 @@ def stream_audio():
         return Response(mimetype="audio/mpeg")
     
     youtube_url = build_youtube_url(video_id)
-    print(f"--- Stream Request: {video_id} ---", flush=True)
+    request_id = f"{video_id}_{int(time.time())}_{request.remote_addr[-4:]}"
+    print(f"--- Stream Request Start: {request_id} ---", flush=True)
     
     def generate():
         # Increment listener count
         with STREAMS_LOCK:
             ACTIVE_STREAMS[video_id] = ACTIVE_STREAMS.get(video_id, 0) + 1
+            current_listeners = ACTIVE_STREAMS[video_id]
+        print(f"[{request_id}] Listener IN (Total: {current_listeners})", flush=True)
             
-        ffmpeg_process = None # Initialize ffmpeg_process outside try block
+        ffmpeg_process = None 
         try:
             # 1. Get the direct audio URL from YouTube
-            # Using 'ba/b' as a robust fallback for "format not available" errors
-            print(f"Fetching audio URL for {video_id} with format 'ba/b'...", flush=True)
+            print(f"[{request_id}] Fetching YouTube URL...", flush=True)
             url_command = ['yt-dlp', '-g', '-f', 'ba/b', youtube_url]
             url_proc = subprocess.run(url_command, capture_output=True, text=True)
             
             if url_proc.returncode != 0:
-                print(f"yt-dlp error: {url_proc.stderr}", flush=True)
+                print(f"[{request_id}] yt-dlp error: {url_proc.stderr}", flush=True)
                 with LOG_LOCK:
                     ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - yt-dlp Error: {video_id}")
                 return
 
             direct_url = url_proc.stdout.strip()
-            print(f"Streaming from: {direct_url[:50]}...", flush=True)
 
-            # 2. Stream using FFmpeg directly from the URL
+            # 2. Stream using FFmpeg
             ffmpeg_command = [
-                'ffmpeg',
-                '-i', direct_url,
-                '-f', 'mp3',
-                '-acodec', 'libmp3lame',
-                '-ab', '128k',
-                '-flush_packets', '1',
-                '-fflags', 'nobuffer',
-                '-loglevel', 'error',
-                'pipe:1'
+                'ffmpeg', '-i', direct_url, '-f', 'mp3', '-acodec', 'libmp3lame',
+                '-ab', '128k', '-flush_packets', '1', '-fflags', 'nobuffer',
+                '-loglevel', 'error', 'pipe:1'
             ]
             
-            # Use bufsize=0 and flush=True for real-time visibility
             ffmpeg_process = subprocess.Popen(
-                ffmpeg_command, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.DEVNULL,
-                bufsize=0
+                ffmpeg_command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
             )
             
             while True:
@@ -903,20 +1128,25 @@ def stream_audio():
                     break
                 yield chunk
                 
+        except GeneratorExit:
+            print(f"[{request_id}] Browser disconnected.", flush=True)
         except Exception as e:
-            print(f"Error: {e}", flush=True)
+            print(f"[{request_id}] Error: {e}", flush=True)
             with LOG_LOCK:
                 ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - Stream Error: {str(e)[:50]}")
         finally:
             # Decrement listener count
             with STREAMS_LOCK:
                 ACTIVE_STREAMS[video_id] = max(0, ACTIVE_STREAMS.get(video_id, 0) - 1)
-            print(f"Cleaning up {video_id}", flush=True)
-            if ffmpeg_process: # Check if ffmpeg_process was successfully created
+                current_listeners = ACTIVE_STREAMS[video_id]
+            print(f"[{request_id}] Listener OUT (Total: {current_listeners})", flush=True)
+            if ffmpeg_process: 
                 ffmpeg_process.terminate()
                 try:
-                    ffmpeg_process.wait(timeout=2)
+                    ffmpeg_process.wait(timeout=1)
                 except subprocess.TimeoutExpired:
+                    ffmpeg_process.kill()
+                except:
                     ffmpeg_process.kill()
 
     return Response(
@@ -947,6 +1177,13 @@ def get_thumbnail():
     response = send_from_directory(CACHE_DIR, f"{video_id}.jpg")
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
+
+@app.route('/favicon_base.png')
+def get_favicon_base():
+    from flask import send_file
+    if os.path.exists('favicon_base.png'):
+        return send_file('favicon_base.png')
+    return "Not Found", 404
 
 @app.route('/ping')
 def ping():
