@@ -4,6 +4,7 @@ services:
     container_name: live2audio
     environment:
       - PYTHONUNBUFFERED=1
+      # - SERVER_IP=192.168.1.100  # Optional: Manual IP override for DLNA
     ports:
       - "5000:5000"
     restart: unless-stopped

@@ -32,6 +32,11 @@ if not os.path.exists(CACHE_DIR):
 
 def get_server_ip():
     """Get the local IP address of the server."""
+    # Allow environment variable override
+    env_ip = os.getenv('SERVER_IP')
+    if env_ip:
+        return env_ip
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
