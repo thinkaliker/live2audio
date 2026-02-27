@@ -85,6 +85,14 @@ def refresh_m3u():
     get_available_streams()
     return jsonify({"status": "success", "message": "Station list and thumbnails updated"})
 
+@app.route('/playlist.m3u')
+def get_playlist():
+    m3u_path = "youtube.m3u"
+    if os.path.exists(m3u_path):
+        from flask import send_file
+        return send_file(m3u_path, mimetype='text/plain')
+    return "M3U file not found", 404
+
 @app.route('/')
 def index():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
@@ -102,12 +110,13 @@ def index():
             :root {
                 --primary: #6366f1;
                 --bg: #0f172a;
-                --card: rgba(30, 41, 59, 0.7);
+                --card: #1e293b;
                 --text: #f8fafc;
+                --border: rgba(255, 255, 255, 0.1);
             }
             body {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-                background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+                background: var(--bg);
                 color: var(--text);
                 margin: 0;
                 display: flex;
@@ -120,11 +129,10 @@ def index():
                 max-width: 900px;
                 width: 100%;
                 background: var(--card);
-                backdrop-filter: blur(12px);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 24px;
+                border: 1px solid var(--border);
+                border-radius: 20px;
                 padding: 40px;
-                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
             }
             header {
                 text-align: center;
@@ -136,7 +144,7 @@ def index():
                 right: 0;
                 top: 0;
                 background: rgba(255, 255, 255, 0.05);
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: 1px solid var(--border);
                 color: #94a3b8;
                 padding: 8px 16px;
                 border-radius: 12px;
@@ -152,11 +160,9 @@ def index():
                 transform: scale(0.95);
             }
             h1 {
-                font-size: 2.5rem;
+                font-size: 2.2rem;
                 margin: 0;
-                background: linear-gradient(to right, #818cf8, #c084fc);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
+                color: var(--primary);
             }
             .stats-grid {
                 display: grid;
