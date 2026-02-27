@@ -36,6 +36,10 @@ Replace `YOUR_SERVER_IP` with the IP of the machine running this docker containe
 - **Manifest Unknown / Probe Failed**: Ensure the container is running and the IP is accessible. The server now handles `HEAD` requests to help Jellyfin's initial probe.
 - **Stream Stops**: YouTube sometimes rotates stream URLs. Restarting the channel in Jellyfin will force a fresh fetch through `yt-dlp`.
 - **Latency**: There is an inherent 2-5 second delay as `yt-dlp` resolves the YouTube stream and `ffmpeg` starts transcoding.
+- **Permission Denied when adding stations**: 
+  - **Linux/Docker**: Ensure the user running Docker has write permissions to `youtube.m3u`. Run `chmod 666 youtube.m3u` on the host.
+  - **Windows**: Right-click `youtube.m3u` -> Properties -> Ensure "Read-only" is unchecked.
+  - **Docker Compose**: Ensure the file is correctly mounted in your `docker-compose.yml`.
 
 ## How it works
 - **Flask**: Receives the request from Jellyfin.
