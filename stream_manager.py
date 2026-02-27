@@ -93,6 +93,45 @@ def get_playlist():
         return send_file(m3u_path, mimetype='text/plain')
     return "M3U file not found", 404
 
+@app.route('/add_station', methods=['POST'])
+def add_station():
+    data = request.json
+    url = data.get('url', '').strip()
+    name = data.get('name', '').strip()
+    tvg_id = data.get('id', 'Manual').strip()
+    group = data.get('group', 'YouTube Radio').strip()
+
+    if not url or not name:
+        return jsonify({"status": "error", "message": "URL and Name are required"}), 400
+
+    # Extract video ID
+    vid_id = None
+    if "?v=" in url:
+        vid_id = url.split("?v=")[1].split("&")[0]
+    elif "youtu.be/" in url:
+        vid_id = url.split("youtu.be/")[1].split("?")[0]
+    else:
+        vid_id = url # Assume raw ID if no URL format detected
+
+    if not vid_id:
+        return jsonify({"status": "error", "message": "Could not extract YouTube Video ID"}), 400
+
+    # Sanitize and construct stream URL
+    stream_url = f"http://localhost:5000/stream.mp3?v={vid_id}"
+    
+    # Append to M3U
+    m3u_path = "youtube.m3u"
+    try:
+        with open(m3u_path, 'a') as f:
+            f.write(f'\n#EXTINF:-1 tvg-id="{tvg_id}" tvg-logo="http://localhost:5000/thumbnail.jpg?v={vid_id}" group-title="{group}", {name}\n')
+            f.write(f'{stream_url}\n')
+        
+        # Trigger refresh
+        get_available_streams()
+        return jsonify({"status": "success", "message": f"Added {name}"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/')
 def index():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
@@ -151,10 +190,22 @@ def index():
                 cursor: pointer;
                 font-size: 0.75rem;
                 transition: all 0.2s;
+                display: flex;
+                align-items: center;
+                gap: 6px;
             }
             .refresh-btn:hover {
                 background: rgba(255, 255, 255, 0.1);
                 color: var(--text);
+            }
+            .add-btn {
+                right: 120px;
+                background: var(--primary);
+                color: white;
+                border: none;
+            }
+            .add-btn:hover {
+                filter: brightness(1.2);
             }
             .refresh-btn:active {
                 transform: scale(0.95);
@@ -164,6 +215,48 @@ def index():
                 margin: 0;
                 color: var(--primary);
             }
+            /* Modal Styles */
+            .modal-overlay {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.8);
+                backdrop-filter: blur(4px);
+                display: none;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            }
+            .modal {
+                background: var(--card);
+                border: 1px solid var(--border);
+                border-radius: 20px;
+                padding: 30px;
+                width: 100%;
+                max-width: 450px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            }
+            .modal h3 { margin-top: 0; color: var(--primary); }
+            .form-group { margin-bottom: 20px; }
+            .form-group label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px; }
+            .form-group input {
+                width: 100%;
+                background: rgba(0,0,0,0.2);
+                border: 1px solid var(--border);
+                padding: 10px;
+                border-radius: 8px;
+                color: white;
+                box-sizing: border-box;
+            }
+            .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+            .btn {
+                padding: 10px 20px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 0.9rem;
+                border: none;
+            }
+            .btn-primary { background: var(--primary); color: white; }
+            .btn-secondary { background: rgba(255,255,255,0.05); color: #94a3b8; }
             .stats-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -275,6 +368,7 @@ def index():
     <body>
         <div class="container">
             <header>
+                <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
                 <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh List</button>
                 <h1>Live2Audio</h1>
                 <p style="color: #94a3b8">Premium YouTube-to-Jellyfin Audio Streamer</p>
@@ -332,7 +426,70 @@ def index():
                 {% endif %}
             </section>
         </div>
+
+        <!-- Add Station Modal -->
+        <div class="modal-overlay" id="modalOverlay">
+            <div class="modal">
+                <h3>Add New Station</h3>
+                <div class="form-group">
+                    <label>YouTube URL or Video ID</label>
+                    <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=...">
+                </div>
+                <div class="form-group">
+                    <label>Station Name</label>
+                    <input type="text" id="stationName" placeholder="Lofi Radio">
+                </div>
+                <div class="form-group">
+                    <label>Station ID (Optional)</label>
+                    <input type="text" id="stationId" placeholder="LofiGirl">
+                </div>
+                <div class="form-group">
+                    <label>Group (Optional)</label>
+                    <input type="text" id="stationGroup" placeholder="YouTube Radio">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="submitStation()" id="submitBtn">Add Station</button>
+                </div>
+            </div>
+        </div>
+
         <script>
+            function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
+            function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
+
+            async function submitStation() {
+                const url = document.getElementById('stationUrl').value;
+                const name = document.getElementById('stationName').value;
+                const id = document.getElementById('stationId').value;
+                const group = document.getElementById('stationGroup').value;
+                const btn = document.getElementById('submitBtn');
+
+                if (!url || !name) return alert('URL and Name are required');
+
+                btn.disabled = true;
+                btn.innerText = 'Adding...';
+
+                try {
+                    const response = await fetch('/add_station', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url, name, id, group })
+                    });
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        const err = await response.json();
+                        alert('Error: ' + err.message);
+                    }
+                } catch (e) {
+                    alert('Failed to connect to server');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerText = 'Add Station';
+                }
+            }
+
             async function refreshM3U() {
                 const btn = document.getElementById('refreshBtn');
                 const originalText = btn.innerText;
