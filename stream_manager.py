@@ -416,6 +416,71 @@ def index():
             }
             .badge-success { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
             .badge-error { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+
+            /* Playback Bar Styles */
+            .playback-bar {
+                position: fixed;
+                bottom: 24px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: calc(100% - 48px);
+                max-width: 500px;
+                background: rgba(30, 41, 59, 0.7);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                padding: 12px 16px;
+                display: none;
+                align-items: center;
+                justify-content: space-between;
+                z-index: 1000;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+                animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            @keyframes slideUp {
+                from { transform: translate(-50%, 100%); opacity: 0; }
+                to { transform: translate(-50%, 0); opacity: 1; }
+            }
+            .playback-content {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex: 1;
+            }
+            .playback-logo-small {
+                width: 36px;
+                height: 36px;
+                border-radius: 8px;
+                object-fit: cover;
+            }
+            .playback-info-text {
+                display: flex;
+                flex-direction: column;
+            }
+            .playback-name {
+                font-size: 0.9rem;
+                font-weight: 600;
+                color: white;
+            }
+            .playback-status {
+                font-size: 0.7rem;
+                color: #94a3b8;
+            }
+            .stop-btn {
+                background: rgba(239, 68, 68, 0.2) !important;
+                color: #fca5a5 !important;
+                border: 1px solid rgba(239, 68, 68, 0.3) !important;
+                padding: 6px 14px !important;
+                font-size: 0.75rem !important;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .stop-btn:hover {
+                background: rgba(239, 68, 68, 0.3) !important;
+                color: white !important;
+            }
         </style>
     </head>
     <body>
@@ -496,6 +561,18 @@ def index():
             </section>
         </div>
 
+        <!-- Playback Bar -->
+        <div id="playback-bar" class="playback-bar">
+            <div class="playback-content">
+                <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='#334155'">
+                <div class="playback-info-text">
+                    <span id="playback-station-name" class="playback-name">Station Name</span>
+                    <span class="playback-status">Currently Playing</span>
+                </div>
+            </div>
+            <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
+        </div>
+
         <!-- Add Station Modal -->
         <div class="modal-overlay" id="modalOverlay">
             <div class="modal">
@@ -530,23 +607,46 @@ def index():
                 });
             }
 
+            function stopAllAudio() {
+                document.querySelectorAll('audio').forEach(a => {
+                    a.pause();
+                    a.parentElement.style.display = 'none';
+                });
+                document.getElementById('playback-bar').style.display = 'none';
+                sessionStorage.removeItem('isPlaying');
+            }
+
             function togglePlayer(id) {
                 const p = document.getElementById(id);
                 const audio = p.querySelector('audio');
+                const bar = document.getElementById('playback-bar');
+                
                 if (p.style.display === 'block') {
                     p.style.display = 'none';
                     audio.pause();
+                    bar.style.display = 'none';
+                    sessionStorage.removeItem('isPlaying');
                 } else {
                     // Stop any other playing audio
                     document.querySelectorAll('audio').forEach(a => {
-                        // Only pause if not the one we want to play
                         if (a.parentElement.id !== id) {
                             a.pause();
                             a.parentElement.style.display = 'none';
                         }
                     });
+                    
                     p.style.display = 'block';
                     audio.play();
+                    sessionStorage.setItem('isPlaying', id);
+
+                    // Update and show playback bar
+                    const item = p.closest('.stream-item');
+                    const name = item.querySelector('.stream-info span[style*="font-weight: 500"]').innerText;
+                    const logo = item.querySelector('.stream-logo').src;
+                    
+                    document.getElementById('playback-station-name').innerText = name;
+                    document.getElementById('playback-logo').src = logo;
+                    bar.style.display = 'flex';
                 }
             }
             function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
@@ -598,17 +698,33 @@ def index():
                         
                         // To preserve audio playback, we should ideally only update the DOM elements that changed
                         // or re-attach the audio element if it was playing.
-                        // For simplicity, we check if ANY audio is playing. If so, we are careful.
                         const activeAudio = document.querySelector('audio:not([paused])');
                         const playingId = activeAudio ? activeAudio.parentElement.id : null;
                         const currentTime = activeAudio ? activeAudio.currentTime : 0;
+                        
+                        // Capture bar state
+                        const barVisible = document.getElementById('playback-bar').style.display === 'flex';
+                        const barName = document.getElementById('playback-station-name').innerText;
+                        const barLogo = document.getElementById('playback-logo').src;
 
                         container.innerHTML = html;
 
                         if (playingId) {
-                            const newAudio = document.getElementById(playingId).querySelector('audio');
-                            newAudio.currentTime = currentTime;
-                            newAudio.play().catch(() => {}); // Handle autoplay restrictions
+                            const newContainer = document.getElementById(playingId);
+                            if (newContainer) {
+                                const newAudio = newContainer.querySelector('audio');
+                                newAudio.currentTime = currentTime;
+                                // Only resume if it was actually playing (not paused)
+                                newAudio.play().catch(e => console.log("Resume deferred:", e));
+                                
+                                // Restore bar
+                                const bar = document.getElementById('playback-bar');
+                                document.getElementById('playback-station-name').innerText = barName;
+                                document.getElementById('playback-logo').src = barLogo;
+                                bar.style.display = 'flex';
+                            }
+                        } else {
+                            document.getElementById('playback-bar').style.display = 'none';
                         }
                     } else {
                         container.innerHTML = '<p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>';
