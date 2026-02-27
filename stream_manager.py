@@ -284,23 +284,47 @@ def cast_to_dlna():
 
     data = request.json
     udn = data.get('udn')
+    manual_location = data.get('manual_location', '').strip()
     video_id = data.get('video_id')
     
-    if not udn or not video_id:
-        return jsonify({"success": False, "message": "Missing device UDN or video ID"}), 400
+    if not (udn or manual_location) or not video_id:
+        return jsonify({"success": False, "message": "Missing device UDN/IP or video ID"}), 400
 
     # Construct the absolute stream URL
     server_ip = get_server_ip()
     stream_url = f"http://{server_ip}:5000/stream.mp3?v={video_id}"
     
-    print(f"Casting {stream_url} to device {udn}", flush=True)
-    
     try:
-        devices = upnpclient.discover()
-        target_device = next((d for d in devices if d.udn == udn), None)
+        target_device = None
+        
+        if udn:
+            print(f"Casting {stream_url} to discovered device {udn}", flush=True)
+            devices = upnpclient.discover()
+            target_device = next((d for d in devices if d.udn == udn), None)
+        elif manual_location:
+            print(f"Casting {stream_url} to manual location {manual_location}", flush=True)
+            # Check if it's already a full URL
+            if manual_location.startswith('http'):
+                target_device = upnpclient.Device(manual_location)
+            else:
+                # Treat as IP and try common DLNA ports
+                ports = [8080, 49152, 49153, 5000, 80]
+                for port in ports:
+                    try:
+                        url = f"http://{manual_location}:{port}/description.xml"
+                        target_device = upnpclient.Device(url)
+                        if target_device: break
+                    except: continue
+                
+                if not target_device:
+                    # Generic fallback for some devices
+                    try:
+                        url = f"http://{manual_location}:80/device.xml"
+                        target_device = upnpclient.Device(url)
+                    except: pass
         
         if not target_device:
-            return jsonify({"success": False, "message": "Device not found"}), 404
+            return jsonify({"success": False, "message": "Device not found or unreachable"}), 404
             
         av_transport = next((s for s in target_device.services if "AVTransport" in s.service_id), None)
         if not av_transport:
@@ -934,6 +958,15 @@ def index():
                     <button class="refresh-btn" onclick="refreshDevices()" id="refreshDevicesBtn">↻ Refresh</button>
                 </div>
                 <p id="castStationName" style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 15px;"></p>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>Manual Device entry (IP or Location URL)</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="manualDeviceIp" placeholder="192.168.1.100" style="flex: 1;">
+                        <button class="btn btn-primary" onclick="castToManualIp()" style="padding: 8px 12px; font-size: 0.8rem;">Cast to IP</button>
+                    </div>
+                </div>
+
                 <div id="device-list" class="device-list">
                     <!-- Devices will be populated here -->
                     <p style="color: #64748b; font-style: italic; text-align: center;">Searching for devices...</p>
@@ -1016,15 +1049,24 @@ def index():
             async function castToDevice(udn) {
                 if (!currentCastStreamId) return;
                 
-                const item = event.currentTarget;
-                const originalBg = item.style.background;
-                item.style.background = 'rgba(148, 163, 184, 0.2)';
+                const item = event ? event.currentTarget : null;
+                const originalBg = item ? item.style.background : '';
+                if (item) item.style.background = 'rgba(148, 163, 184, 0.2)';
                 
+                const payload = { video_id: currentCastStreamId };
+                if (typeof udn === 'string' && udn.includes('://')) {
+                    payload.manual_location = udn;
+                } else if (udn.includes('.')) {
+                    payload.manual_location = udn;
+                } else {
+                    payload.udn = udn;
+                }
+
                 try {
                     const response = await fetch('/api/dlna/cast', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ udn: udn, video_id: currentCastStreamId })
+                        body: JSON.stringify(payload)
                     });
                     const result = await response.json();
                     
@@ -1037,8 +1079,14 @@ def index():
                 } catch (e) {
                     alert('Request failed');
                 } finally {
-                    item.style.background = originalBg;
+                    if (item) item.style.background = originalBg;
                 }
+            }
+
+            function castToManualIp() {
+                const ip = document.getElementById('manualDeviceIp').value.trim();
+                if (!ip) return alert('Please enter an IP or URL');
+                castToDevice(ip);
             }
             function copyLink(url) {
                 navigator.clipboard.writeText(url).then(() => {
