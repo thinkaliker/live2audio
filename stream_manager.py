@@ -1174,9 +1174,18 @@ def index():
                 const originalBg = item ? item.style.background : '';
                 if (item) item.style.background = 'rgba(148, 163, 184, 0.2)';
                 
-                // Get station name BEFORE closing modal
+                // Get station metadata BEFORE closing modal
                 const castStationElem = document.getElementById('castStationName');
                 const stationName = castStationElem ? castStationElem.innerText.replace('Target Station: ', '') : 'Unknown Station';
+                
+                // Find the logo from the main list for this station
+                let logo = '';
+                const activeBtn = document.getElementById(`play-btn-${currentCastStreamId}`);
+                if (activeBtn) {
+                    const item = activeBtn.closest('.stream-item');
+                    const logoElem = item ? item.querySelector('.stream-logo') : null;
+                    if (logoElem) logo = logoElem.src;
+                }
 
                 const payload = { video_id: currentCastStreamId };
                 if (typeof udn === 'string' && (udn.includes('://') || udn.includes('.'))) {
@@ -1199,6 +1208,8 @@ def index():
                         
                         safeSetText('playback-station-name', stationName);
                         safeSetText('playback-status', `Casting to ${result.device_name || 'Device'}`);
+                        const logoPlaying = document.getElementById('playback-logo');
+                        if (logoPlaying) logoPlaying.src = logo;
                         
                         if (bar) bar.style.display = 'flex';
                         
@@ -1206,6 +1217,9 @@ def index():
                         sessionStorage.setItem('isPlaying', currentCastStreamId);
                         sessionStorage.setItem('isCasting', 'true');
                         sessionStorage.setItem('castDeviceTarget', udn); 
+                        sessionStorage.setItem('stationName', stationName);
+                        sessionStorage.setItem('stationLogo', logo);
+                        sessionStorage.setItem('castingTo', result.device_name || 'Device');
                         
                         // Stop any local playback
                         const audio = document.getElementById('main-audio');
@@ -1280,6 +1294,14 @@ def index():
                     btn.innerText = "▶ Play";
                 });
 
+                // Clear session storage
+                sessionStorage.removeItem('isPlaying');
+                sessionStorage.removeItem('isCasting');
+                sessionStorage.removeItem('castDeviceTarget');
+                sessionStorage.removeItem('stationName');
+                sessionStorage.removeItem('stationLogo');
+                sessionStorage.removeItem('castingTo');
+
                 // Update live count immediately
                 updateDashboard();
             }
@@ -1319,12 +1341,47 @@ def index():
                 if (logoPlaying) logoPlaying.src = logo;
                 if (bar) bar.style.display = 'flex';
 
+                // Persist state
+                sessionStorage.setItem('isPlaying', id);
+                sessionStorage.setItem('isCasting', 'false');
+                sessionStorage.setItem('stationName', name);
+                sessionStorage.setItem('stationLogo', logo);
+
                 // Update live count immediately
                 updateDashboard();
             }
 
+            function restoreUIState() {
+                const isPlaying = sessionStorage.getItem('isPlaying');
+                if (!isPlaying) return;
+
+                const isCasting = sessionStorage.getItem('isCasting') === 'true';
+                const name = sessionStorage.getItem('stationName');
+                const logo = sessionStorage.getItem('stationLogo');
+                const castingTo = sessionStorage.getItem('castingTo');
+
+                const bar = document.getElementById('playback-bar');
+                if (bar) {
+                    safeSetText('playback-station-name', name || 'Station');
+                    safeSetText('playback-status', isCasting ? `Casting to ${castingTo || 'Device'}` : 'Currently Playing');
+                    const logoPlaying = document.getElementById('playback-logo');
+                    if (logoPlaying && logo) logoPlaying.src = logo;
+                    bar.style.display = 'flex';
+                }
+
+                // Update play buttons on the page (they might be re-rendered by updateDashboard)
+                setTimeout(() => {
+                    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+                        if (btn.id === `play-btn-${isPlaying}`) {
+                            btn.innerText = "⏹ Stop";
+                        }
+                    });
+                }, 500);
+            }
+
             // Global volume control listener
             document.addEventListener('DOMContentLoaded', () => {
+                restoreUIState();
                 const volControl = document.getElementById('volume-control');
                 volControl.addEventListener('input', (e) => {
                     const vol = e.target.value;
