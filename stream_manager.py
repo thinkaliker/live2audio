@@ -405,6 +405,20 @@ def cast_to_dlna():
         print(f"Casting failed: {e}", flush=True)
         return jsonify({"success": False, "message": str(e)}), 500
 
+@app.route('/api/stats')
+def api_stats():
+    uptime = str(datetime.now() - START_TIME).split('.')[0]
+    streams = get_available_streams()
+    with STREAMS_LOCK:
+        live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
+    return jsonify({
+        "uptime": uptime,
+        "live_count": live_count,
+        "recently_played": LAST_STREAM["name"],
+        "streams": streams,
+        "errors": list(ERROR_LOG)
+    })
+
 @app.route('/api/dlna/stop', methods=['POST'])
 def stop_dlna():
     if not upnpclient:
