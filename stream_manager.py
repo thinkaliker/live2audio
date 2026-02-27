@@ -294,30 +294,82 @@ def cast_to_dlna():
     server_ip = get_server_ip()
     stream_url = f"http://{server_ip}:5000/stream.mp3?v={video_id}"
     
+    def perform_cast(device, url, vid):
+        try:
+            print(f"[{vid}] Background cast starting for {device.friendly_name}...", flush=True)
+            av_transport = next((s for s in device.services if "AVTransport" in s.service_id), None)
+            if not av_transport:
+                print(f"[{vid}] Error: AVTransport not found on {device.friendly_name}", flush=True)
+                return
+            
+            # 1. Stop if needed
+            try:
+                print(f"[{vid}] Sending Stop to {device.friendly_name}...", flush=True)
+                av_transport.Stop(InstanceID=0)
+            except Exception as e:
+                print(f"[{vid}] Stop (optional) failed: {e}", flush=True)
+            
+            # 2. Set URI
+            print(f"[{vid}] Setting URI to {url}...", flush=True)
+            av_transport.SetAVTransportURI(
+                InstanceID=0,
+                CurrentURI=url,
+                CurrentURIMetaData=""
+            )
+            
+            # 3. Play
+            print(f"[{vid}] Sending Play command...", flush=True)
+            av_transport.Play(InstanceID=0, Speed='1')
+            print(f"[{vid}] Cast successful on {device.friendly_name}", flush=True)
+        except Exception as e:
+            print(f"[{vid}] Background cast failed: {e}", flush=True)
+            with LOG_LOCK:
+                ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - Cast Error: {str(e)[:50]}")
+
     try:
         target_device = None
+        # ... logic to find target_device (Already updated in last tool call)
         
         if udn:
-            print(f"Casting {stream_url} to discovered device {udn}", flush=True)
-            devices = upnpclient.discover()
-            target_device = next((d for d in devices if d.udn == udn), None)
+            print(f"[{video_id}] Casting to discovered device {udn}", flush=True)
+            # Find the location from our cache first to avoid re-discovery
+            location = None
+            with DEVICES_LOCK:
+                for d in DLNA_DEVICES:
+                    if d['udn'] == udn:
+                        location = d['location']
+                        break
+            
+            if location:
+                try:
+                    target_device = upnpclient.Device(location)
+                except Exception as e:
+                    print(f"Failed to connect to cached location {location}: {e}", flush=True)
+            
+            # Fallback to discovery if cache fails or UDN not found
+            if not target_device:
+                devices = upnpclient.discover()
+                target_device = next((d for d in devices if d.udn == udn), None)
         elif manual_location:
-            print(f"Casting {stream_url} to manual location {manual_location}", flush=True)
-            # Check if it's already a full URL
+            print(f"[{video_id}] Casting to manual location {manual_location}", flush=True)
             if manual_location.startswith('http'):
                 target_device = upnpclient.Device(manual_location)
             else:
-                # Treat as IP and try common DLNA ports
+                # Optimized IP probing
                 ports = [8080, 49152, 49153, 5000, 80]
                 for port in ports:
+                    url = f"http://{manual_location}:{port}/description.xml"
                     try:
-                        url = f"http://{manual_location}:{port}/description.xml"
-                        target_device = upnpclient.Device(url)
-                        if target_device: break
+                        # Use a small timeout for the initial connection check if possible
+                        # upnpclient doesn't expose timeout easily, but we can try a quick socket check
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.settimeout(0.5)
+                            if s.connect_ex((manual_location, port)) == 0:
+                                target_device = upnpclient.Device(url)
+                                if target_device: break
                     except: continue
                 
                 if not target_device:
-                    # Generic fallback for some devices
                     try:
                         url = f"http://{manual_location}:80/device.xml"
                         target_device = upnpclient.Device(url)
@@ -326,27 +378,11 @@ def cast_to_dlna():
         if not target_device:
             return jsonify({"success": False, "message": "Device not found or unreachable"}), 404
             
-        av_transport = next((s for s in target_device.services if "AVTransport" in s.service_id), None)
-        if not av_transport:
-            return jsonify({"success": False, "message": "AVTransport service not found on device"}), 400
-            
-        # Stop current playback if any
-        try:
-            av_transport.Stop(InstanceID=0)
-        except Exception:
-            pass
-            
-        # Set the URI
-        av_transport.SetAVTransportURI(
-            InstanceID=0,
-            CurrentURI=stream_url,
-            CurrentURIMetaData=""
-        )
+        # Start the actual UPnP command sequence in a background thread
+        # This prevents browser timeouts and ensures the backend handles the service calls
+        threading.Thread(target=perform_cast, args=(target_device, stream_url, video_id), daemon=True).start()
         
-        # Start playback
-        av_transport.Play(InstanceID=0, Speed='1')
-        
-        return jsonify({"success": True, "message": f"Casting to {target_device.friendly_name}"})
+        return jsonify({"success": True, "message": f"Cast initiated to {target_device.friendly_name}"})
     except Exception as e:
         print(f"Casting failed: {e}", flush=True)
         return jsonify({"success": False, "message": str(e)}), 500

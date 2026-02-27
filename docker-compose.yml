@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./youtube.m3u:/app/youtube.m3u
+    network_mode: host
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:5000/ping" ]
       interval: 30s
