@@ -14,6 +14,8 @@ ERROR_LOG = deque(maxlen=10)
 LOG_LOCK = threading.Lock()
 LAST_STREAM = {"name": "None", "time": "Never"}
 VIDEO_ID_MAP = {}  # Map video_id to station name
+ACTIVE_STREAMS = {}  # Map video_id to count of active listeners
+STREAMS_LOCK = threading.Lock()
 
 CACHE_DIR = "cache"
 if not os.path.exists(CACHE_DIR):
@@ -56,7 +58,15 @@ def get_available_streams():
                         
                         # Always use local thumbnail proxy for dashboard to avoid localhost issues
                         logo = f"/thumbnail.jpg?v={vid_id}"
-                        streams.append({"name": name, "url": url_line, "logo": logo, "id": vid_id})
+                        with STREAMS_LOCK:
+                            listeners = ACTIVE_STREAMS.get(vid_id, 0)
+                        streams.append({
+                            "name": name, 
+                            "url": url_line, 
+                            "logo": logo, 
+                            "id": vid_id,
+                            "listeners": listeners
+                        })
                         
                         # Cache in background
                         threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
@@ -136,6 +146,9 @@ def add_station():
 def index():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
     streams = get_available_streams()
+    
+    with STREAMS_LOCK:
+        live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
     
     html = """
     <!DOCTYPE html>
@@ -259,9 +272,34 @@ def index():
             .btn-secondary { background: rgba(255,255,255,0.05); color: #94a3b8; }
             .stats-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
                 gap: 20px;
                 margin-bottom: 40px;
+            }
+            .pulse {
+                width: 8px;
+                height: 8px;
+                background: #22c55e;
+                border-radius: 50%;
+                display: inline-block;
+                margin-right: 8px;
+                box-shadow: 0 0 0 rgba(34, 197, 94, 0.4);
+                animation: pulse 2s infinite;
+            }
+            @keyframes pulse {
+                0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+                70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+            }
+            .player-container {
+                width: 100%;
+                margin-top: 12px;
+                display: none;
+            }
+            audio {
+                width: 100%;
+                height: 32px;
+                filter: invert(100%) hue-rotate(180deg) brightness(1.5);
             }
             .stat-card {
                 background: rgba(255, 255, 255, 0.03);
@@ -381,6 +419,10 @@ def index():
                     <span class="stat-label">System Uptime</span>
                 </div>
                 <div class="stat-card">
+                    <span class="stat-value">{{ live_count }}</span>
+                    <span class="stat-label">Live Stations</span>
+                </div>
+                <div class="stat-card">
                     <span class="stat-value" style="font-size: 1.1rem;">{{ last_stream_name }}</span>
                     <span class="stat-label">Recently Played</span>
                 </div>
@@ -398,12 +440,21 @@ def index():
                         <div class="stream-logo" style="background:#334155"></div>
                         {% endif %}
                         <div class="stream-info">
-                            <span style="font-weight: 500;">{{ stream.name }}</span>
-                            <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }}</span>
+                            <div style="display: flex; align-items: center;">
+                                {% if stream.listeners > 0 %}<span class="pulse"></span>{% endif %}
+                                <span style="font-weight: 500;">{{ stream.name }}</span>
+                            </div>
+                            <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }} {% if stream.listeners > 0 %}• {{ stream.listeners }} listening{% endif %}</span>
                         </div>
                         <div class="stream-actions">
-                            <a href="/stream.mp3?v={{ stream.id }}" class="action-link" target="_blank">♫ MP3</a>
+                            <button class="action-link" onclick="togglePlayer('player-{{ stream.id }}')">▶ Play</button>
+                            <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v={{ stream.id }}')">📋 Copy Link</button>
                             <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YouTube</a>
+                        </div>
+                        <div class="player-container" id="player-{{ stream.id }}">
+                            <audio controls preload="none">
+                                <source src="/stream.mp3?v={{ stream.id }}" type="audio/mpeg">
+                            </audio>
                         </div>
                     </div>
                     {% endfor %}
@@ -455,6 +506,28 @@ def index():
         </div>
 
         <script>
+            function copyLink(url) {
+                navigator.clipboard.writeText(url).then(() => {
+                    alert('Copied stream URL to clipboard!');
+                });
+            }
+
+            function togglePlayer(id) {
+                const p = document.getElementById(id);
+                const audio = p.querySelector('audio');
+                if (p.style.display === 'block') {
+                    p.style.display = 'none';
+                    audio.pause();
+                } else {
+                    // Stop any other playing audio
+                    document.querySelectorAll('audio').forEach(a => {
+                        a.pause();
+                        a.parentElement.style.display = 'none';
+                    });
+                    p.style.display = 'block';
+                    audio.play();
+                }
+            }
             function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
             function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
 
@@ -525,7 +598,8 @@ def index():
         uptime=uptime, 
         streams=streams, 
         errors=list(ERROR_LOG),
-        last_stream_name=LAST_STREAM["name"]
+        last_stream_name=LAST_STREAM["name"],
+        live_count=live_count
     )
 
 @app.route('/stream.mp3', methods=['GET', 'HEAD'])
@@ -553,6 +627,10 @@ def stream_audio():
     print(f"--- Stream Request: {video_id} ---", flush=True)
     
     def generate():
+        # Increment listener count
+        with STREAMS_LOCK:
+            ACTIVE_STREAMS[video_id] = ACTIVE_STREAMS.get(video_id, 0) + 1
+            
         ffmpeg_process = None # Initialize ffmpeg_process outside try block
         try:
             # 1. Get the direct audio URL from YouTube
@@ -602,6 +680,9 @@ def stream_audio():
             with LOG_LOCK:
                 ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - Stream Error: {str(e)[:50]}")
         finally:
+            # Decrement listener count
+            with STREAMS_LOCK:
+                ACTIVE_STREAMS[video_id] = max(0, ACTIVE_STREAMS.get(video_id, 0) - 1)
             print(f"Cleaning up {video_id}", flush=True)
             if ffmpeg_process: # Check if ffmpeg_process was successfully created
                 ffmpeg_process.terminate()
