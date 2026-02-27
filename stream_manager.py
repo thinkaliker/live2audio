@@ -698,12 +698,14 @@ def index():
                         
                         // To preserve audio playback, we should ideally only update the DOM elements that changed
                         // or re-attach the audio element if it was playing.
-                        const activeAudio = document.querySelector('audio:not([paused])');
-                        const playingId = activeAudio ? activeAudio.parentElement.id : null;
+                        const activeAudio = document.querySelector('audio');
+                        const isActuallyPlaying = activeAudio && !activeAudio.paused;
+                        const playingId = isActuallyPlaying ? activeAudio.parentElement.id : null;
                         const currentTime = activeAudio ? activeAudio.currentTime : 0;
                         
                         // Capture bar state
-                        const barVisible = document.getElementById('playback-bar').style.display === 'flex';
+                        const bar = document.getElementById('playback-bar');
+                        const barVisible = bar.style.display === 'flex';
                         const barName = document.getElementById('playback-station-name').innerText;
                         const barLogo = document.getElementById('playback-logo').src;
 
@@ -718,12 +720,12 @@ def index():
                                 newAudio.play().catch(e => console.log("Resume deferred:", e));
                                 
                                 // Restore bar
-                                const bar = document.getElementById('playback-bar');
                                 document.getElementById('playback-station-name').innerText = barName;
                                 document.getElementById('playback-logo').src = barLogo;
                                 bar.style.display = 'flex';
                             }
-                        } else {
+                        } else if (!isActuallyPlaying) {
+                            // If nothing was playing, ensure the bar is hidden
                             document.getElementById('playback-bar').style.display = 'none';
                         }
                     } else {
