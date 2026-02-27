@@ -299,7 +299,7 @@ def cast_to_dlna():
     server_ip = get_server_ip()
     stream_url = f"http://{server_ip}:5000/stream.mp3?v={video_id}"
     
-    def perform_cast(device, url, vid):
+    def perform_cast(device, url, vid, name):
         try:
             print(f"[{vid}] Background cast starting for {device.friendly_name}...", flush=True)
             av_transport = next((s for s in device.services if "AVTransport" in s.service_id), None)
@@ -307,6 +307,17 @@ def cast_to_dlna():
                 print(f"[{vid}] Error: AVTransport not found on {device.friendly_name}", flush=True)
                 return
             
+            # Generate DIDL-Lite Metadata
+            metadata = f"""<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+                <item id="1" parentID="0" restricted="1">
+                    <dc:title>{name}</dc:title>
+                    <upnp:class>object.item.audioItem.musicTrack</upnp:class>
+                    <dc:creator>Live2Audio</dc:creator>
+                    <upnp:artist>Live2Audio</upnp:artist>
+                    <res protocolInfo="http-get:*:audio/mpeg:*">{url}</res>
+                </item>
+            </DIDL-Lite>"""
+
             # 1. Stop if needed
             try:
                 print(f"[{vid}] Sending Stop to {device.friendly_name}...", flush=True)
@@ -314,12 +325,12 @@ def cast_to_dlna():
             except Exception as e:
                 print(f"[{vid}] Stop (optional) failed: {e}", flush=True)
             
-            # 2. Set URI
-            print(f"[{vid}] Setting URI to {url}...", flush=True)
+            # 2. Set URI with Metadata
+            print(f"[{vid}] Setting URI to {url} with metadata...", flush=True)
             av_transport.SetAVTransportURI(
                 InstanceID=0,
                 CurrentURI=url,
-                CurrentURIMetaData=""
+                CurrentURIMetaData=metadata
             )
             
             # 3. Play
@@ -333,7 +344,7 @@ def cast_to_dlna():
 
     try:
         target_device = None
-        # ... logic to find target_device (Already updated in last tool call)
+        # ... logic to find target_device
         
         if udn:
             print(f"[{video_id}] Casting to discovered device {udn}", flush=True)
@@ -383,28 +394,56 @@ def cast_to_dlna():
         if not target_device:
             return jsonify({"success": False, "message": "Device not found or unreachable"}), 404
             
+        station_name = VIDEO_ID_MAP.get(video_id, "Unknown Station")
+
         # Start the actual UPnP command sequence in a background thread
         # This prevents browser timeouts and ensures the backend handles the service calls
-        threading.Thread(target=perform_cast, args=(target_device, stream_url, video_id), daemon=True).start()
+        threading.Thread(target=perform_cast, args=(target_device, stream_url, video_id, station_name), daemon=True).start()
         
-        return jsonify({"success": True, "message": f"Cast initiated to {target_device.friendly_name}"})
+        return jsonify({"success": True, "message": f"Cast initiated to {target_device.friendly_name}", "device_name": target_device.friendly_name})
     except Exception as e:
         print(f"Casting failed: {e}", flush=True)
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route('/api/stats')
-def api_stats():
-    uptime = str(datetime.now() - START_TIME).split('.')[0]
-    streams = get_available_streams()
-    with STREAMS_LOCK:
-        live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
-    return jsonify({
-        "uptime": uptime,
-        "live_count": live_count,
-        "recently_played": LAST_STREAM["name"],
-        "streams": streams,
-        "errors": list(ERROR_LOG)
-    })
+@app.route('/api/dlna/stop', methods=['POST'])
+def stop_dlna():
+    if not upnpclient:
+        return jsonify({"success": False, "message": "upnpclient not installed"}), 500
+
+    data = request.json
+    udn = data.get('udn')
+    manual_location = data.get('manual_location', '').strip()
+    
+    if not (udn or manual_location):
+        return jsonify({"success": False, "message": "Missing device UDN/IP"}), 400
+
+    try:
+        target_device = None
+        if udn:
+            devices = upnpclient.discover()
+            target_device = next((d for d in devices if d.udn == udn), None)
+        elif manual_location:
+            if manual_location.startswith('http'):
+                target_device = upnpclient.Device(manual_location)
+            else:
+                ports = [8080, 49152, 49153, 5000, 80]
+                for port in ports:
+                    try:
+                        url = f"http://{manual_location}:{port}/description.xml"
+                        target_device = upnpclient.Device(url)
+                        if target_device: break
+                    except: continue
+        
+        if not target_device:
+            return jsonify({"success": False, "message": "Device not found"}), 404
+            
+        av_transport = next((s for s in target_device.services if "AVTransport" in s.service_id), None)
+        if av_transport:
+            av_transport.Stop(InstanceID=0)
+            return jsonify({"success": True, "message": "Stopped DLNA playback"})
+        return jsonify({"success": False, "message": "AVTransport not found"}), 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/')
 def index():
@@ -1112,8 +1151,32 @@ def index():
                     const result = await response.json();
                     
                     if (result.success) {
-                        alert('Successfully started casting!');
+                        // alert('Successfully started casting!');
                         closeCastModal();
+                        
+                        // Update playback bar for DLNA
+                        const bar = document.getElementById('playback-bar');
+                        const stationName = document.getElementById('castStationName').innerText.replace('Target Station: ', '');
+                        
+                        document.getElementById('playback-station-name').innerText = stationName;
+                        document.getElementById('playback-status').innerText = `Casting to ${result.device_name}`;
+                        bar.style.display = 'flex';
+                        
+                        // Set session storage
+                        sessionStorage.setItem('isPlaying', currentCastStreamId);
+                        sessionStorage.setItem('isCasting', 'true');
+                        sessionStorage.setItem('castDeviceTarget', udn); // Store UDN or IP for stopping later
+                        
+                        // Stop any local playback
+                        const audio = document.getElementById('main-audio');
+                        audio.pause();
+                        audio.src = "";
+                        
+                        // Update local play buttons
+                        document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+                            btn.innerText = btn.id === `play-btn-${currentCastStreamId}` ? "⏹ Stop" : "▶ Play";
+                        });
+
                     } else {
                         alert('Cast failed: ' + result.message);
                     }
@@ -1135,14 +1198,38 @@ def index():
                 });
             }
 
-            function stopAllAudio() {
+            async function stopAllAudio() {
                 const audio = document.getElementById('main-audio');
                 audio.pause();
                 audio.src = "";
                 audio.load();
                 
+                // If we were casting, send a stop request to the backend
+                const isCasting = sessionStorage.getItem('isCasting');
+                const castTarget = sessionStorage.getItem('castDeviceTarget');
+                if (isCasting === 'true' && castTarget) {
+                    const payload = {};
+                    if (castTarget.includes('.') || castTarget.includes('://')) {
+                        payload.manual_location = castTarget;
+                    } else {
+                        payload.udn = castTarget;
+                    }
+                    
+                    try {
+                        await fetch('/api/dlna/stop', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                    } catch (e) {
+                        console.error("Failed to stop DLNA:", e);
+                    }
+                }
+
                 document.getElementById('playback-bar').style.display = 'none';
                 sessionStorage.removeItem('isPlaying');
+                sessionStorage.removeItem('isCasting');
+                sessionStorage.removeItem('castDeviceTarget');
                 
                 // Reset all play buttons
                 document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
