@@ -1,14 +1,17 @@
 FROM python:3.11-alpine
 
-# Combine package installation and pip cleanup
-# nodejs is used as the JavaScript runtime for yt-dlp
-RUN apk add --no-cache ffmpeg curl nodejs && \
-    pip install --no-cache-dir flask yt-dlp gunicorn
-
 WORKDIR /app
-COPY stream_manager.py .
-COPY youtube.m3u .
-COPY favicon_base.png .
+
+# Combine installation of system dependencies and python requirements
+# We install build tools to compile lxml, then remove them to keep image size small
+COPY requirements.txt .
+RUN apk add --no-cache ffmpeg curl nodejs \
+    libxml2 libxslt build-base libxml2-dev libxslt-dev && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apk del build-base libxml2-dev libxslt-dev
+
+# Copy the rest of the application files
+COPY . .
 
 EXPOSE 5000
 

@@ -2,9 +2,14 @@ import subprocess
 import os
 import time
 import threading
+import socket
 from datetime import datetime, timedelta
 from collections import deque
 from flask import Flask, Response, request, jsonify, redirect, render_template_string
+try:
+    import upnpclient
+except ImportError:
+    upnpclient = None
 
 app = Flask(__name__)
 
@@ -17,9 +22,56 @@ VIDEO_ID_MAP = {}  # Map video_id to station name
 ACTIVE_STREAMS = {}  # Map video_id to count of active listeners
 STREAMS_LOCK = threading.Lock()
 
+# DLNA Discovery
+DLNA_DEVICES = []
+DEVICES_LOCK = threading.Lock()
+
 CACHE_DIR = "cache"
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR, exist_ok=True)
+
+def get_server_ip():
+    """Get the local IP address of the server."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def discover_dlna_devices():
+    """Discover DLNA clients on the network."""
+    if not upnpclient:
+        print("upnpclient not installed. DLNA discovery skipped.", flush=True)
+        return
+
+    global DLNA_DEVICES
+    print("Starting DLNA discovery...", flush=True)
+    try:
+        devices = upnpclient.discover()
+        new_devices = []
+        for d in devices:
+            # Look for devices with AVTransport service (RenderingControl is also common)
+            try:
+                if any("AVTransport" in s.service_id for s in d.services):
+                    new_devices.append({
+                        "name": d.friendly_name,
+                        "location": d.location,
+                        "udn": d.udn
+                    })
+            except Exception:
+                continue
+        
+        with DEVICES_LOCK:
+            DLNA_DEVICES = new_devices
+        print(f"Discovered {len(DLNA_DEVICES)} DLNA devices.", flush=True)
+    except Exception as e:
+        print(f"DLNA discovery failed: {e}", flush=True)
+
+def start_discovery_thread():
+    threading.Thread(target=discover_dlna_devices, daemon=True).start()
 
 def cache_thumbnail(video_id):
     """Download thumbnail to local cache if it doesn't exist."""
@@ -213,6 +265,67 @@ def edit_station():
         return jsonify({"status": "success", "message": f"Updated {new_name}"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/dlna/devices')
+def get_dlna_devices():
+    with DEVICES_LOCK:
+        return jsonify(DLNA_DEVICES)
+
+@app.route('/api/dlna/refresh', methods=['POST'])
+def refresh_dlna_devices():
+    discover_dlna_devices()
+    with DEVICES_LOCK:
+        return jsonify(DLNA_DEVICES)
+
+@app.route('/api/dlna/cast', methods=['POST'])
+def cast_to_dlna():
+    if not upnpclient:
+        return jsonify({"success": False, "message": "upnpclient not installed"}), 500
+
+    data = request.json
+    udn = data.get('udn')
+    video_id = data.get('video_id')
+    
+    if not udn or not video_id:
+        return jsonify({"success": False, "message": "Missing device UDN or video ID"}), 400
+
+    # Construct the absolute stream URL
+    server_ip = get_server_ip()
+    stream_url = f"http://{server_ip}:5000/stream.mp3?v={video_id}"
+    
+    print(f"Casting {stream_url} to device {udn}", flush=True)
+    
+    try:
+        devices = upnpclient.discover()
+        target_device = next((d for d in devices if d.udn == udn), None)
+        
+        if not target_device:
+            return jsonify({"success": False, "message": "Device not found"}), 404
+            
+        av_transport = next((s for s in target_device.services if "AVTransport" in s.service_id), None)
+        if not av_transport:
+            return jsonify({"success": False, "message": "AVTransport service not found on device"}), 400
+            
+        # Stop current playback if any
+        try:
+            av_transport.Stop(InstanceID=0)
+        except Exception:
+            pass
+            
+        # Set the URI
+        av_transport.SetAVTransportURI(
+            InstanceID=0,
+            CurrentURI=stream_url,
+            CurrentURIMetaData=""
+        )
+        
+        # Start playback
+        av_transport.Play(InstanceID=0, Speed='1')
+        
+        return jsonify({"success": True, "message": f"Casting to {target_device.friendly_name}"})
+    except Exception as e:
+        print(f"Casting failed: {e}", flush=True)
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/stats')
 def api_stats():
@@ -650,6 +763,47 @@ def index():
                 color: #94a3b8;
                 font-size: 0.8rem;
             }
+            /* DLNA Modal List */
+            .device-list {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin-top: 15px;
+                max-height: 250px;
+                overflow-y: auto;
+            }
+            .device-item {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid var(--border);
+                padding: 12px;
+                border-radius: 12px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .device-item:hover {
+                background: rgba(255, 255, 255, 0.1);
+                border-color: var(--primary);
+            }
+            .device-info {
+                display: flex;
+                flex-direction: column;
+            }
+            .device-name {
+                font-size: 0.9rem;
+                font-weight: 500;
+                color: white;
+            }
+            .device-location {
+                font-size: 0.7rem;
+                color: #64748b;
+            }
+            .cast-icon {
+                color: var(--primary);
+                font-size: 1.2rem;
+            }
         </style>
     </head>
     <body>
@@ -699,8 +853,8 @@ def index():
                             </div>
                             <div class="stream-actions">
                                 <button class="action-link" id="play-btn-{{ stream.id }}" onclick="togglePlayer('{{ stream.id }}')">▶ Play</button>
+                                <button class="action-link" onclick="openCastModal('{{ stream.id }}', '{{ stream.name }}')">📺 Cast</button>
                                 <button class="action-link" onclick="openEditModal('{{ stream.id }}', '{{ stream.name }}', '{{ stream.url }}', '{{ stream.group }}', '{{ stream.tvg_id }}')">✎ Edit</button>
-                                <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v={{ stream.id }}')">📋 Copy</button>
                                 <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YT</a>
                             </div>
                         </div>
@@ -772,7 +926,120 @@ def index():
             </div>
         </div>
 
+        <!-- Cast Modal -->
+        <div class="modal-overlay" id="castModalOverlay">
+            <div class="modal">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 id="castModalTitle" style="margin: 0;">Cast to Device</h3>
+                    <button class="refresh-btn" onclick="refreshDevices()" id="refreshDevicesBtn">↻ Refresh</button>
+                </div>
+                <p id="castStationName" style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 15px;"></p>
+                <div id="device-list" class="device-list">
+                    <!-- Devices will be populated here -->
+                    <p style="color: #64748b; font-style: italic; text-align: center;">Searching for devices...</p>
+                </div>
+                <div class="modal-actions" style="margin-top: 25px;">
+                    <button class="btn btn-secondary" onclick="closeCastModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <script>
+            let currentCastStreamId = null;
+
+            function openCastModal(streamId, stationName) {
+                currentCastStreamId = streamId;
+                document.getElementById('castStationName').innerText = "Target Station: " + stationName;
+                document.getElementById('castModalOverlay').style.display = 'flex';
+                loadDevices();
+            }
+
+            function closeCastModal() {
+                document.getElementById('castModalOverlay').style.display = 'none';
+                currentCastStreamId = null;
+            }
+
+            async function loadDevices() {
+                const list = document.getElementById('device-list');
+                try {
+                    const response = await fetch('/api/dlna/devices');
+                    const devices = await response.json();
+                    
+                    if (devices.length === 0) {
+                        list.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">No DLNA devices found. Try refreshing.</p>';
+                        return;
+                    }
+                    
+                    let html = '';
+                    devices.forEach(d => {
+                        html += `
+                        <div class="device-item" onclick="castToDevice('${d.udn}')">
+                            <div class="device-info">
+                                <span class="device-name">${d.name}</span>
+                                <span class="device-location">${d.location}</span>
+                            </div>
+                            <span class="cast-icon">📺</span>
+                        </div>`;
+                    });
+                    list.innerHTML = html;
+                } catch (e) {
+                    list.innerHTML = '<p style="color: #ef4444; font-style: italic; text-align: center;">Failed to load devices.</p>';
+                }
+            }
+
+            async function refreshDevices() {
+                const btn = document.getElementById('refreshDevicesBtn');
+                const list = document.getElementById('device-list');
+                const originalText = btn.innerText;
+                
+                btn.innerText = '⌛ Scanning...';
+                btn.disabled = true;
+                list.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">Scanning for devices...</p>';
+                
+                try {
+                    const response = await fetch('/api/dlna/refresh', { method: 'POST' });
+                    const devices = await response.json();
+                    
+                    if (devices.length === 0) {
+                        list.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">No DLNA devices found.</p>';
+                    } else {
+                        loadDevices();
+                    }
+                } catch (e) {
+                    list.innerHTML = '<p style="color: #ef4444; font-style: italic; text-align: center;">Scan failed.</p>';
+                } finally {
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                }
+            }
+
+            async function castToDevice(udn) {
+                if (!currentCastStreamId) return;
+                
+                const item = event.currentTarget;
+                const originalBg = item.style.background;
+                item.style.background = 'rgba(148, 163, 184, 0.2)';
+                
+                try {
+                    const response = await fetch('/api/dlna/cast', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ udn: udn, video_id: currentCastStreamId })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('Successfully started casting!');
+                        closeCastModal();
+                    } else {
+                        alert('Cast failed: ' + result.message);
+                    }
+                } catch (e) {
+                    alert('Request failed');
+                } finally {
+                    item.style.background = originalBg;
+                }
+            }
             function copyLink(url) {
                 navigator.clipboard.writeText(url).then(() => {
                     alert('Copied stream URL to clipboard!');
@@ -916,8 +1183,8 @@ def index():
                                 </div>
                                 <div class="stream-actions">
                                     <button class="action-link" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${isThisPlaying ? '⏹ Stop' : '▶ Play'}</button>
+                                    <button class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺 Cast</button>
                                     <button class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎ Edit</button>
-                                    <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v=${stream.id}')">📋 Copy</button>
                                     <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗ YT</a>
                                 </div>
                             </div>`;
@@ -1192,7 +1459,9 @@ def ping():
 if __name__ == '__main__':
     # Pre-populate map when running locally
     get_available_streams()
+    start_discovery_thread()
     app.run(host='0.0.0.0', port=5000)
 else:
     # Pre-populate map when running under Gunicorn
     get_available_streams()
+    start_discovery_thread()
