@@ -3,6 +3,7 @@ import os
 import time
 import threading
 import socket
+import html
 from datetime import datetime, timedelta
 from collections import deque
 from flask import Flask, Response, request, jsonify, redirect, render_template_string
@@ -308,9 +309,10 @@ def cast_to_dlna():
                 return
             
             # Generate DIDL-Lite Metadata
+            escaped_name = html.escape(name)
             metadata = f"""<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
                 <item id="1" parentID="0" restricted="1">
-                    <dc:title>{name}</dc:title>
+                    <dc:title>{escaped_name}</dc:title>
                     <upnp:class>object.item.audioItem.musicTrack</upnp:class>
                     <dc:creator>Live2Audio</dc:creator>
                     <upnp:artist>Live2Audio</upnp:artist>
@@ -344,16 +346,17 @@ def cast_to_dlna():
 
     try:
         target_device = None
-        # ... logic to find target_device
         
         if udn:
             print(f"[{video_id}] Casting to discovered device {udn}", flush=True)
             # Find the location from our cache first to avoid re-discovery
             location = None
+            cached_name = "DLNA Device"
             with DEVICES_LOCK:
                 for d in DLNA_DEVICES:
                     if d['udn'] == udn:
                         location = d['location']
+                        cached_name = d.get('name', 'DLNA Device')
                         break
             
             if location:
@@ -369,20 +372,23 @@ def cast_to_dlna():
         elif manual_location:
             print(f"[{video_id}] Casting to manual location {manual_location}", flush=True)
             if manual_location.startswith('http'):
-                target_device = upnpclient.Device(manual_location)
+                try:
+                    target_device = upnpclient.Device(manual_location)
+                except Exception as e:
+                    print(f"Failed to load manual XML {manual_location}: {e}", flush=True)
             else:
                 # Optimized IP probing
                 ports = [8080, 49152, 49153, 5000, 80]
                 for port in ports:
                     url = f"http://{manual_location}:{port}/description.xml"
                     try:
-                        # Use a small timeout for the initial connection check if possible
-                        # upnpclient doesn't expose timeout easily, but we can try a quick socket check
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.settimeout(0.5)
+                            s.settimeout(0.3) # Faster timeout for probe
                             if s.connect_ex((manual_location, port)) == 0:
-                                target_device = upnpclient.Device(url)
-                                if target_device: break
+                                try:
+                                    target_device = upnpclient.Device(url)
+                                    if target_device: break
+                                except: pass
                     except: continue
                 
                 if not target_device:
@@ -392,15 +398,27 @@ def cast_to_dlna():
                     except: pass
         
         if not target_device:
-            return jsonify({"success": False, "message": "Device not found or unreachable"}), 404
+            # If we were casting via IP, at least we tried. 
+            # Return 404 but try to be helpful
+            return jsonify({"success": False, "message": f"Device at {manual_location or udn} not found or unreachable"}), 404
             
+        # Get friendly name safely
+        try:
+            device_name = getattr(target_device, 'friendly_name', 'DLNA Device')
+        except:
+            device_name = 'DLNA Device'
+
         station_name = VIDEO_ID_MAP.get(video_id, "Unknown Station")
 
         # Start the actual UPnP command sequence in a background thread
-        # This prevents browser timeouts and ensures the backend handles the service calls
         threading.Thread(target=perform_cast, args=(target_device, stream_url, video_id, station_name), daemon=True).start()
         
-        return jsonify({"success": True, "message": f"Cast initiated to {target_device.friendly_name}", "device_name": target_device.friendly_name})
+        return jsonify({
+            "success": True, 
+            "message": f"Cast initiated to {device_name}", 
+            "device_name": device_name,
+            "udn": getattr(target_device, 'udn', manual_location)
+        })
     except Exception as e:
         print(f"Casting failed: {e}", flush=True)
         return jsonify({"success": False, "message": str(e)}), 500
@@ -1100,7 +1118,7 @@ def index():
                     let html = '';
                     devices.forEach(d => {
                         html += `
-                        <div class="device-item" onclick="castToDevice('${d.udn}')">
+                        <div class="device-item" onclick="castToDevice('${d.udn}', event)">
                             <div class="device-info">
                                 <span class="device-name">${d.name}</span>
                                 <span class="device-location">${d.location}</span>
@@ -1140,17 +1158,19 @@ def index():
                 }
             }
 
-            async function castToDevice(udn) {
+            async function castToDevice(udn, castEvent) {
                 if (!currentCastStreamId) return;
                 
-                const item = event ? event.currentTarget : null;
+                const item = castEvent ? castEvent.currentTarget : null;
                 const originalBg = item ? item.style.background : '';
                 if (item) item.style.background = 'rgba(148, 163, 184, 0.2)';
                 
+                // Get station name BEFORE closing modal
+                const castStationElem = document.getElementById('castStationName');
+                const stationName = castStationElem ? castStationElem.innerText.replace('Target Station: ', '') : 'Unknown Station';
+
                 const payload = { video_id: currentCastStreamId };
-                if (typeof udn === 'string' && udn.includes('://')) {
-                    payload.manual_location = udn;
-                } else if (udn.includes('.')) {
+                if (typeof udn === 'string' && (udn.includes('://') || udn.includes('.'))) {
                     payload.manual_location = udn;
                 } else {
                     payload.udn = udn;
@@ -1165,37 +1185,38 @@ def index():
                     const result = await response.json();
                     
                     if (result.success) {
-                        // alert('Successfully started casting!');
-                        closeCastModal();
-                        
                         // Update playback bar for DLNA
                         const bar = document.getElementById('playback-bar');
-                        const stationName = document.getElementById('castStationName').innerText.replace('Target Station: ', '');
-                        
-                        document.getElementById('playback-station-name').innerText = stationName;
-                        document.getElementById('playback-status').innerText = `Casting to ${result.device_name}`;
-                        bar.style.display = 'flex';
+                        if (bar) {
+                            document.getElementById('playback-station-name').innerText = stationName;
+                            document.getElementById('playback-status').innerText = `Casting to ${result.device_name || 'Device'}`;
+                            bar.style.display = 'flex';
+                        }
                         
                         // Set session storage
                         sessionStorage.setItem('isPlaying', currentCastStreamId);
                         sessionStorage.setItem('isCasting', 'true');
-                        sessionStorage.setItem('castDeviceTarget', udn); // Store UDN or IP for stopping later
+                        sessionStorage.setItem('castDeviceTarget', udn); 
                         
                         // Stop any local playback
                         const audio = document.getElementById('main-audio');
-                        audio.pause();
-                        audio.src = "";
+                        if (audio) {
+                            audio.pause();
+                            audio.src = "";
+                        }
                         
                         // Update local play buttons
                         document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
                             btn.innerText = btn.id === `play-btn-${currentCastStreamId}` ? "⏹ Stop" : "▶ Play";
                         });
 
+                        closeCastModal();
                     } else {
                         alert('Cast failed: ' + result.message);
                     }
                 } catch (e) {
-                    alert('Request failed');
+                    console.error('Cast Error:', e);
+                    alert('Request failed: ' + e.message);
                 } finally {
                     if (item) item.style.background = originalBg;
                 }
@@ -1204,7 +1225,7 @@ def index():
             function castToManualIp() {
                 const ip = document.getElementById('manualDeviceIp').value.trim();
                 if (!ip) return alert('Please enter an IP or URL');
-                castToDevice(ip);
+                castToDevice(ip, null);
             }
             function copyLink(url) {
                 navigator.clipboard.writeText(url).then(() => {
