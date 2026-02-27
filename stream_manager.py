@@ -142,6 +142,20 @@ def add_station():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/api/stats')
+def api_stats():
+    uptime = str(datetime.now() - START_TIME).split('.')[0]
+    streams = get_available_streams()
+    with STREAMS_LOCK:
+        live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
+    return jsonify({
+        "uptime": uptime,
+        "live_count": live_count,
+        "recently_played": LAST_STREAM["name"],
+        "streams": streams,
+        "errors": list(ERROR_LOG)
+    })
+
 @app.route('/')
 def index():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
@@ -156,7 +170,6 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="refresh" content="30">
         <title>Live2Audio Dashboard</title>
         <style>
             :root {
@@ -377,6 +390,7 @@ def index():
                 text-decoration: none;
                 transition: all 0.2s;
                 white-space: nowrap;
+                cursor: pointer;
             }
             .action-link:hover {
                 background: rgba(255, 255, 255, 0.12);
@@ -401,6 +415,7 @@ def index():
                 font-weight: 600;
             }
             .badge-success { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+            .badge-error { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
         </style>
     </head>
     <body>
@@ -409,72 +424,75 @@ def index():
                 <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
                 <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh List</button>
                 <h1>Live2Audio</h1>
-                <p style="color: #94a3b8">Premium YouTube-to-Jellyfin Audio Streamer</p>
-                <span class="badge badge-success">● SYSTEM ONLINE</span>
+                <span class="badge badge-success" id="system-status-badge">● SYSTEM ONLINE</span>
             </header>
 
             <div class="stats-grid">
                 <div class="stat-card">
-                    <span class="stat-value">{{ uptime }}</span>
+                    <span class="stat-value" id="uptime-val">{{ uptime }}</span>
                     <span class="stat-label">System Uptime</span>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-value">{{ live_count }}</span>
+                    <span class="stat-value" id="live-count-val">{{ live_count }}</span>
                     <span class="stat-label">Live Stations</span>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-value" style="font-size: 1.1rem;">{{ last_stream_name }}</span>
+                    <span class="stat-value" id="recently-played-val" style="font-size: 1.1rem;">{{ last_stream_name }}</span>
                     <span class="stat-label">Recently Played</span>
                 </div>
             </div>
 
             <section>
                 <h2>Station List Configuration</h2>
-                {% if streams %}
-                <div class="stream-list">
-                    {% for stream in streams %}
-                    <div class="stream-item">
-                        {% if stream.logo %}
-                        <img src="{{ stream.logo }}" class="stream-logo" alt="Logo">
-                        {% else %}
-                        <div class="stream-logo" style="background:#334155"></div>
-                        {% endif %}
-                        <div class="stream-info">
-                            <div style="display: flex; align-items: center;">
-                                {% if stream.listeners > 0 %}<span class="pulse"></span>{% endif %}
-                                <span style="font-weight: 500;">{{ stream.name }}</span>
+                <div id="stream-list-container">
+                    {% if streams %}
+                    <div class="stream-list">
+                        {% for stream in streams %}
+                        <div class="stream-item">
+                            {% if stream.logo %}
+                            <img src="{{ stream.logo }}" class="stream-logo" alt="Logo">
+                            {% else %}
+                            <div class="stream-logo" style="background:#334155"></div>
+                            {% endif %}
+                            <div class="stream-info">
+                                <div style="display: flex; align-items: center;">
+                                    {% if stream.listeners > 0 %}<span class="pulse"></span>{% endif %}
+                                    <span style="font-weight: 500;">{{ stream.name }}</span>
+                                </div>
+                                <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }} {% if stream.listeners > 0 %}• {{ stream.listeners }} listening{% endif %}</span>
                             </div>
-                            <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }} {% if stream.listeners > 0 %}• {{ stream.listeners }} listening{% endif %}</span>
+                            <div class="stream-actions">
+                                <button class="action-link" onclick="togglePlayer('player-{{ stream.id }}')">▶ Play</button>
+                                <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v={{ stream.id }}')">📋 Copy Link</button>
+                                <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YouTube</a>
+                            </div>
+                            <div class="player-container" id="player-{{ stream.id }}">
+                                <audio controls preload="none">
+                                    <source src="/stream.mp3?v={{ stream.id }}" type="audio/mpeg">
+                                </audio>
+                            </div>
                         </div>
-                        <div class="stream-actions">
-                            <button class="action-link" onclick="togglePlayer('player-{{ stream.id }}')">▶ Play</button>
-                            <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v={{ stream.id }}')">📋 Copy Link</button>
-                            <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YouTube</a>
-                        </div>
-                        <div class="player-container" id="player-{{ stream.id }}">
-                            <audio controls preload="none">
-                                <source src="/stream.mp3?v={{ stream.id }}" type="audio/mpeg">
-                            </audio>
-                        </div>
+                        {% endfor %}
                     </div>
-                    {% endfor %}
+                    {% else %}
+                    <p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>
+                    {% endif %}
                 </div>
-                {% else %}
-                <p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>
-                {% endif %}
             </section>
 
             <section>
                 <h2>Recent Session Errors</h2>
-                {% if errors %}
-                <div class="error-log">
-                    {% for error in errors %}
-                    <div>{{ error }}</div>
-                    {% endfor %}
+                <div id="error-log-container">
+                    {% if errors %}
+                    <div class="error-log">
+                        {% for error in errors %}
+                        <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p style="color: #64748b; font-style: italic;">No errors reported in this session.</p>
+                    {% endif %}
                 </div>
-                {% else %}
-                <p style="color: #64748b; font-style: italic;">No errors reported in this session.</p>
-                {% endif %}
             </section>
         </div>
 
@@ -521,8 +539,11 @@ def index():
                 } else {
                     // Stop any other playing audio
                     document.querySelectorAll('audio').forEach(a => {
-                        a.pause();
-                        a.parentElement.style.display = 'none';
+                        // Only pause if not the one we want to play
+                        if (a.parentElement.id !== id) {
+                            a.pause();
+                            a.parentElement.style.display = 'none';
+                        }
                     });
                     p.style.display = 'block';
                     audio.play();
@@ -530,6 +551,90 @@ def index():
             }
             function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
             function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
+
+            async function updateDashboard() {
+                const badge = document.getElementById('system-status-badge');
+                try {
+                    const response = await fetch('/api/stats');
+                    if (!response.ok) throw new Error('Offline');
+                    const data = await response.json();
+                    
+                    badge.innerText = '● SYSTEM ONLINE';
+                    badge.className = 'badge badge-success';
+                    
+                    document.getElementById('uptime-val').innerText = data.uptime;
+                    document.getElementById('live-count-val').innerText = data.live_count;
+                    document.getElementById('recently-played-val').innerText = data.recently_played;
+                    
+                    // Update streams without stopping audio
+                    const container = document.getElementById('stream-list-container');
+                    if (data.streams.length > 0) {
+                        let html = '<div class="stream-list">';
+                        data.streams.forEach(stream => {
+                            const isPlaying = document.getElementById(`player-${stream.id}`)?.style.display === 'block';
+                            html += `
+                            <div class="stream-item">
+                                <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='#334155'">
+                                <div class="stream-info">
+                                    <div style="display: flex; align-items: center;">
+                                        ${stream.listeners > 0 ? '<span class="pulse"></span>' : ''}
+                                        <span style="font-weight: 500;">${stream.name}</span>
+                                    </div>
+                                    <span style="font-size: 0.7rem; color: #64748b;">ID: ${stream.id} ${stream.listeners > 0 ? '• ' + stream.listeners + ' listening' : ''}</span>
+                                </div>
+                                <div class="stream-actions">
+                                    <button class="action-link" onclick="togglePlayer('player-${stream.id}')">▶ Play</button>
+                                    <button class="action-link" onclick="copyLink('http://' + window.location.host + '/stream.mp3?v=${stream.id}')">📋 Copy Link</button>
+                                    <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗ YouTube</a>
+                                </div>
+                                <div class="player-container" id="player-${stream.id}" style="${isPlaying ? 'display: block;' : ''}">
+                                    <audio controls preload="none">
+                                        <source src="/stream.mp3?v=${stream.id}" type="audio/mpeg">
+                                    </audio>
+                                </div>
+                            </div>`;
+                        });
+                        html += '</div>';
+                        
+                        // To preserve audio playback, we should ideally only update the DOM elements that changed
+                        // or re-attach the audio element if it was playing.
+                        // For simplicity, we check if ANY audio is playing. If so, we are careful.
+                        const activeAudio = document.querySelector('audio:not([paused])');
+                        const playingId = activeAudio ? activeAudio.parentElement.id : null;
+                        const currentTime = activeAudio ? activeAudio.currentTime : 0;
+
+                        container.innerHTML = html;
+
+                        if (playingId) {
+                            const newAudio = document.getElementById(playingId).querySelector('audio');
+                            newAudio.currentTime = currentTime;
+                            newAudio.play().catch(() => {}); // Handle autoplay restrictions
+                        }
+                    } else {
+                        container.innerHTML = '<p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>';
+                    }
+
+                    // Update errors
+                    const errorContainer = document.getElementById('error-log-container');
+                    if (data.errors.length > 0) {
+                        let errorHtml = '<div class="error-log">';
+                        data.errors.forEach(err => {
+                            errorHtml += `<div>${err}</div>`;
+                        });
+                        errorHtml += '</div>';
+                        errorContainer.innerHTML = errorHtml;
+                    } else {
+                        errorContainer.innerHTML = '<p style="color: #64748b; font-style: italic;">No errors reported in this session.</p>';
+                    }
+                } catch (e) {
+                    console.error("Dashboard update failed", e);
+                    badge.innerText = '● SYSTEM OFFLINE';
+                    badge.className = 'badge badge-error';
+                }
+            }
+
+            // Update every 10 seconds
+            setInterval(updateDashboard, 10000);
 
             async function submitStation() {
                 const url = document.getElementById('stationUrl').value;
@@ -550,7 +655,8 @@ def index():
                         body: JSON.stringify({ url, name, id, group })
                     });
                     if (response.ok) {
-                        location.reload();
+                        closeModal();
+                        updateDashboard();
                     } else {
                         const err = await response.json();
                         alert('Error: ' + err.message);
@@ -573,7 +679,11 @@ def index():
                     const response = await fetch('/refresh_m3u', { method: 'POST' });
                     if (response.ok) {
                         btn.innerText = '✅ Updated';
-                        setTimeout(() => { location.reload(); }, 500);
+                        setTimeout(() => { 
+                            btn.innerText = originalText;
+                            btn.disabled = false;
+                            updateDashboard();
+                        }, 1000);
                     } else {
                         btn.innerText = '❌ Error';
                         setTimeout(() => { 
