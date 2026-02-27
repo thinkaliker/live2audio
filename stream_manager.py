@@ -1011,7 +1011,7 @@ def index():
                 <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='#334155'">
                 <div class="playback-info-text">
                     <span id="playback-station-name" class="playback-name">Station Name</span>
-                    <span class="playback-status">Currently Playing</span>
+                    <span id="playback-status" class="playback-status">Currently Playing</span>
                 </div>
             </div>
             <div class="volume-container">
@@ -1092,9 +1092,18 @@ def index():
         <script>
             let currentCastStreamId = null;
 
+            function safeSetText(id, text) {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.innerText = text;
+                } else {
+                    console.warn(`[SafeSetText] Element #${id} not found.`);
+                }
+            }
+
             function openCastModal(streamId, stationName) {
                 currentCastStreamId = streamId;
-                document.getElementById('castStationName').innerText = "Target Station: " + stationName;
+                safeSetText('castStationName', "Target Station: " + stationName);
                 document.getElementById('castModalOverlay').style.display = 'flex';
                 loadDevices();
             }
@@ -1187,11 +1196,11 @@ def index():
                     if (result.success) {
                         // Update playback bar for DLNA
                         const bar = document.getElementById('playback-bar');
-                        if (bar) {
-                            document.getElementById('playback-station-name').innerText = stationName;
-                            document.getElementById('playback-status').innerText = `Casting to ${result.device_name || 'Device'}`;
-                            bar.style.display = 'flex';
-                        }
+                        
+                        safeSetText('playback-station-name', stationName);
+                        safeSetText('playback-status', `Casting to ${result.device_name || 'Device'}`);
+                        
+                        if (bar) bar.style.display = 'flex';
                         
                         // Set session storage
                         sessionStorage.setItem('isPlaying', currentCastStreamId);
@@ -1299,12 +1308,16 @@ def index():
 
                 // Update and show playback bar
                 const item = document.getElementById(`play-btn-${id}`).closest('.stream-item');
-                const name = item.querySelector('.stream-info span[style*="font-weight: 500"]').innerText;
-                const logo = item.querySelector('.stream-logo').src;
+                const nameElem = item.querySelector('.station-name-text');
+                const name = nameElem ? nameElem.innerText : 'Unknown Station';
+                const logoElem = item.querySelector('.stream-logo');
+                const logo = logoElem ? logoElem.src : '';
                 
-                document.getElementById('playback-station-name').innerText = name;
-                document.getElementById('playback-logo').src = logo;
-                bar.style.display = 'flex';
+                safeSetText('playback-station-name', name);
+                safeSetText('playback-status', 'Currently Playing');
+                const logoPlaying = document.getElementById('playback-logo');
+                if (logoPlaying) logoPlaying.src = logo;
+                if (bar) bar.style.display = 'flex';
 
                 // Update live count immediately
                 updateDashboard();
@@ -1367,14 +1380,15 @@ def index():
                     if (!response.ok) throw new Error('Offline');
                     const data = await response.json();
                     
-                    badge.innerText = '● ONLINE';
-                    badge.className = 'badge badge-success';
+                    safeSetText('system-status-badge', '● ONLINE');
+                    const badge = document.getElementById('system-status-badge');
+                    if (badge) badge.className = 'badge badge-success';
                     
                     // Update dynamic favicon badge
                     updateFaviconBadge(data.live_count);
                     
-                    document.getElementById('uptime-val').innerText = data.uptime;
-                    document.getElementById('live-count-val').innerText = data.live_count;
+                    safeSetText('uptime-val', data.uptime);
+                    safeSetText('live-count-val', data.live_count);
                     
                     const container = document.getElementById('stream-list-container');
                     if (data.streams.length > 0) {
@@ -1388,7 +1402,7 @@ def index():
                                 <div class="stream-info">
                                     <div style="display: flex; align-items: center;">
                                         ${stream.listeners > 0 ? '<span class="pulse"></span>' : ''}
-                                        <span style="font-weight: 500;">${stream.name}</span>
+                                        <span class="station-name-text" style="font-weight: 500;">${stream.name}</span>
                                     </div>
                                     <span style="font-size: 0.7rem; color: #64748b;">ID: ${stream.id} ${stream.listeners > 0 ? '• ' + stream.listeners + ' listening' : ''}</span>
                                 </div>
