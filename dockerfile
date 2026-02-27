@@ -8,6 +8,7 @@ RUN apk add --no-cache ffmpeg curl nodejs && \
 WORKDIR /app
 COPY stream_manager.py .
 COPY youtube.m3u .
+COPY favicon_base.png .
 
 EXPOSE 5000
 

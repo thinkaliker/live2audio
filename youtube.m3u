@@ -10,8 +10,6 @@ http://localhost:5000/stream.mp3?v=TtkFsfOP9QI
 #EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=A8jDx9TLMQc" group-title="YouTube Radio", Lofi Girl Jazz Radio
 http://localhost:5000/stream.mp3?v=A8jDx9TLMQc
 
-A8jDx9TLMQc
-
 #EXTINF:-1 tvg-id="Chillhop" tvg-logo="http://localhost:5000/thumbnail.jpg?v=5yx6BWlEVcY" group-title="YouTube Radio", Chillhop Radio
 http://localhost:5000/stream.mp3?v=5yx6BWlEVcY
 #EXTINF:-1 tvg-id="Chillhop" tvg-logo="http://localhost:5000/thumbnail.jpg?v=i6WzngxTnBA" group-title="YouTube Radio", Chillhop Late Night Radio
