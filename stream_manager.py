@@ -16,6 +16,7 @@ app = Flask(__name__)
 
 # Server metadata
 START_TIME = datetime.now()
+SERVER_ID = str(int(START_TIME.timestamp()))  # Unique ID for this server instance
 ERROR_LOG = deque(maxlen=10)
 LOG_LOCK = threading.Lock()
 LAST_STREAM = {"name": "None", "time": "Never"}
@@ -430,6 +431,7 @@ def api_stats():
     with STREAMS_LOCK:
         live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
     return jsonify({
+        "server_id": SERVER_ID,
         "uptime": uptime,
         "live_count": live_count,
         "recently_played": LAST_STREAM["name"],
@@ -1381,6 +1383,7 @@ def index():
 
             // Global volume control listener
             document.addEventListener('DOMContentLoaded', () => {
+                sessionStorage.setItem('server_id', '{{ server_id }}');
                 restoreUIState();
                 const volControl = document.getElementById('volume-control');
                 volControl.addEventListener('input', (e) => {
@@ -1447,6 +1450,25 @@ def index():
                     safeSetText('uptime-val', data.uptime);
                     safeSetText('live-count-val', data.live_count);
                     
+                    // Check for server restart
+                    const storedServerId = sessionStorage.getItem('server_id');
+                    if (data.server_id && storedServerId && data.server_id !== storedServerId) {
+                        console.log("Server restart detected, clearing stale playback state.");
+                        sessionStorage.removeItem('isPlaying');
+                        sessionStorage.removeItem('isCasting');
+                        sessionStorage.removeItem('castDeviceTarget');
+                        sessionStorage.removeItem('stationName');
+                        sessionStorage.removeItem('stationLogo');
+                        sessionStorage.removeItem('castingTo');
+                        
+                        document.getElementById('playback-bar').style.display = 'none';
+                        const audio = document.getElementById('main-audio');
+                        if (audio) { audio.pause(); audio.src = ""; }
+                    }
+                    if (data.server_id) {
+                        sessionStorage.setItem('server_id', data.server_id);
+                    }
+
                     const container = document.getElementById('stream-list-container');
                     if (data.streams.length > 0) {
                         const playingId = sessionStorage.getItem('isPlaying');
@@ -1606,6 +1628,7 @@ def index():
     """
     return render_template_string(
         html, 
+        server_id=SERVER_ID,
         uptime=uptime, 
         streams=streams, 
         errors=list(ERROR_LOG),
