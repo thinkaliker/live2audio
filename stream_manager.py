@@ -1258,11 +1258,37 @@ def index():
                 });
             }
 
+            function clearPlaybackState() {
+                // Clear session storage
+                sessionStorage.removeItem('isPlaying');
+                sessionStorage.removeItem('isCasting');
+                sessionStorage.removeItem('castDeviceTarget');
+                sessionStorage.removeItem('stationName');
+                sessionStorage.removeItem('stationLogo');
+                sessionStorage.removeItem('castingTo');
+
+                // Update UI elements
+                const bar = document.getElementById('playback-bar');
+                if (bar) bar.style.display = 'none';
+                
+                const audio = document.getElementById('main-audio');
+                if (audio) {
+                    audio.pause();
+                    audio.src = "";
+                    audio.load();
+                }
+
+                // Reset all play buttons
+                document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+                    btn.innerText = "▶ Play";
+                });
+
+                // Update dynamic favicon and stats
+                updateDashboard();
+            }
+
             async function stopAllAudio() {
                 const audio = document.getElementById('main-audio');
-                audio.pause();
-                audio.src = "";
-                audio.load();
                 
                 // If we were casting, send a stop request to the backend
                 const isCasting = sessionStorage.getItem('isCasting');
@@ -1286,26 +1312,7 @@ def index():
                     }
                 }
 
-                document.getElementById('playback-bar').style.display = 'none';
-                sessionStorage.removeItem('isPlaying');
-                sessionStorage.removeItem('isCasting');
-                sessionStorage.removeItem('castDeviceTarget');
-                
-                // Reset all play buttons
-                document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-                    btn.innerText = "▶ Play";
-                });
-
-                // Clear session storage
-                sessionStorage.removeItem('isPlaying');
-                sessionStorage.removeItem('isCasting');
-                sessionStorage.removeItem('castDeviceTarget');
-                sessionStorage.removeItem('stationName');
-                sessionStorage.removeItem('stationLogo');
-                sessionStorage.removeItem('castingTo');
-
-                // Update live count immediately
-                updateDashboard();
+                clearPlaybackState();
             }
 
             function togglePlayer(id) {
@@ -1383,7 +1390,15 @@ def index():
 
             // Global volume control listener
             document.addEventListener('DOMContentLoaded', () => {
-                sessionStorage.setItem('server_id', '{{ server_id }}');
+                const currentServerId = '{{ server_id }}';
+                const storedServerId = sessionStorage.getItem('server_id');
+                
+                if (storedServerId && storedServerId !== currentServerId) {
+                    console.log("Service restart detected on load, cleaning session storage.");
+                    clearPlaybackState();
+                }
+                
+                sessionStorage.setItem('server_id', currentServerId);
                 restoreUIState();
                 const volControl = document.getElementById('volume-control');
                 volControl.addEventListener('input', (e) => {
@@ -1454,16 +1469,7 @@ def index():
                     const storedServerId = sessionStorage.getItem('server_id');
                     if (data.server_id && storedServerId && data.server_id !== storedServerId) {
                         console.log("Server restart detected, clearing stale playback state.");
-                        sessionStorage.removeItem('isPlaying');
-                        sessionStorage.removeItem('isCasting');
-                        sessionStorage.removeItem('castDeviceTarget');
-                        sessionStorage.removeItem('stationName');
-                        sessionStorage.removeItem('stationLogo');
-                        sessionStorage.removeItem('castingTo');
-                        
-                        document.getElementById('playback-bar').style.display = 'none';
-                        const audio = document.getElementById('main-audio');
-                        if (audio) { audio.pause(); audio.src = ""; }
+                        clearPlaybackState();
                     }
                     if (data.server_id) {
                         sessionStorage.setItem('server_id', data.server_id);
