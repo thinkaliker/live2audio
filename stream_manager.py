@@ -1704,7 +1704,11 @@ def stream_audio():
         headers={
             'Cache-Control': 'no-cache',
             'Accept-Ranges': 'none',
-            'Access-Control-Allow-Origin': '*'
+            'Access-Control-Allow-Origin': '*',
+            'icy-name': station_name,
+            'icy-description': 'Live2Audio YouTube Stream',
+            'icy-url': build_youtube_url(video_id),
+            'icy-genre': 'YouTube Radio'
         }
     )
 
