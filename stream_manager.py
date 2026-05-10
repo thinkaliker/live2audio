@@ -1020,7 +1020,7 @@ def index():
                 </div>
             </div>
             <div class="volume-container">
-                <span class="volume-icon">Vol</span>
+                <button id="mute-btn" class="volume-icon" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center;" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
                 <input type="range" class="volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5">
             </div>
             <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
@@ -1408,12 +1408,44 @@ def index():
                     const vol = e.target.value;
                     document.getElementById('main-audio').volume = vol;
                     localStorage.setItem('userVolume', vol);
+                    
+                    const muteBtn = document.getElementById('mute-btn');
+                    if (muteBtn) {
+                        muteBtn.innerText = vol == 0 ? '🔇' : '🔊';
+                    }
                 });
 
                 // Load saved volume
                 const savedVol = localStorage.getItem('userVolume');
                 if (savedVol !== null) {
                     volControl.value = savedVol;
+                }
+                
+                window.toggleMute = function() {
+                    const audio = document.getElementById('main-audio');
+                    const volControl = document.getElementById('volume-control');
+                    const muteBtn = document.getElementById('mute-btn');
+                    
+                    if (audio.volume > 0) {
+                        // Store previous volume and mute
+                        audio.dataset.prevVol = audio.volume;
+                        audio.volume = 0;
+                        volControl.value = 0;
+                        if (muteBtn) muteBtn.innerText = '🔇';
+                    } else {
+                        // Unmute to previous volume or 50%
+                        const prevVol = audio.dataset.prevVol || 0.5;
+                        audio.volume = prevVol;
+                        volControl.value = prevVol;
+                        if (muteBtn) muteBtn.innerText = '🔊';
+                    }
+                    localStorage.setItem('userVolume', audio.volume);
+                };
+
+                // Set initial mute icon if saved volume is 0
+                if (savedVol !== null && parseFloat(savedVol) === 0) {
+                    const muteBtn = document.getElementById('mute-btn');
+                    if (muteBtn) muteBtn.innerText = '🔇';
                 }
 
                 // Initial dashboard update
