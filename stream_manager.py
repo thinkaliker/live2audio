@@ -139,12 +139,15 @@ def get_available_streams():
                             "listeners": listeners
                         })
                         
-                        # Cache in background
-                        threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
+                        # Cache in background only if needed to prevent thread exhaustion
+                        cache_path = os.path.join(CACHE_DIR, f"{vid_id}.jpg")
+                        if not os.path.exists(cache_path):
+                            threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
             
             # Atomic update of the global map to prevent race conditions
             VIDEO_ID_MAP = temp_map
         except Exception as e:
+            print(f"M3U Parse Error: {e}", flush=True)
             with LOG_LOCK:
                 ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - M3U Parse Error: {str(e)}")
     return streams
@@ -1724,8 +1727,13 @@ def stream_audio():
                     ffmpeg_process.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     ffmpeg_process.kill()
+                    ffmpeg_process.wait() # Reap zombie process
                 except:
                     ffmpeg_process.kill()
+                    ffmpeg_process.wait()
+                    
+                if ffmpeg_process.stdout:
+                    ffmpeg_process.stdout.close()
 
     return Response(
         generate(), 
