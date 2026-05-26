@@ -80,13 +80,44 @@ def discover_dlna_devices():
 def start_discovery_thread():
     threading.Thread(target=discover_dlna_devices, daemon=True).start()
 
+PENDING_DOWNLOADS = set()
+DOWNLOADS_LOCK = threading.Lock()
+
 def cache_thumbnail(video_id):
     """Download thumbnail to local cache if it doesn't exist."""
+    if not video_id or video_id == "Unknown":
+        return
+
     cache_path = os.path.join(CACHE_DIR, f"{video_id}.jpg")
-    if not os.path.exists(cache_path):
+    if os.path.exists(cache_path):
+        return
+
+    with DOWNLOADS_LOCK:
+        if video_id in PENDING_DOWNLOADS:
+            return
+        PENDING_DOWNLOADS.add(video_id)
+
+    try:
         print(f"Background caching thumbnail for {video_id}...", flush=True)
         url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-        subprocess.run(['curl', '-s', '-L', '-o', cache_path, url])
+        # Run curl with connect timeout and max-time, and fail on 404
+        result = subprocess.run(
+            ['curl', '-s', '-f', '-L', '--connect-timeout', '5', '--max-time', '10', '-o', cache_path, url],
+            capture_output=True
+        )
+        if result.returncode != 0:
+            print(f"Failed to download thumbnail for {video_id}, creating empty placeholder.", flush=True)
+            try:
+                with open(cache_path, 'w') as placeholder:
+                    placeholder.write("")
+            except Exception as e:
+                print(f"Failed to write placeholder for {video_id}: {e}", flush=True)
+    except Exception as e:
+        print(f"Error caching thumbnail for {video_id}: {e}", flush=True)
+    finally:
+        with DOWNLOADS_LOCK:
+            PENDING_DOWNLOADS.discard(video_id)
+
 
 def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
@@ -140,9 +171,13 @@ def get_available_streams():
                         })
                         
                         # Cache in background only if needed to prevent thread exhaustion
-                        cache_path = os.path.join(CACHE_DIR, f"{vid_id}.jpg")
-                        if not os.path.exists(cache_path):
-                            threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
+                        if vid_id and vid_id != "Unknown":
+                            cache_path = os.path.join(CACHE_DIR, f"{vid_id}.jpg")
+                            if not os.path.exists(cache_path):
+                                with DOWNLOADS_LOCK:
+                                    should_start = vid_id not in PENDING_DOWNLOADS
+                                if should_start:
+                                    threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
             
             # Atomic update of the global map to prevent race conditions
             VIDEO_ID_MAP = temp_map
