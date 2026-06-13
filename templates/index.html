@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2Audio Dashboard</title>
+    <link rel="icon" id="dynamic-favicon" href="/favicon_base.png">
+    <link rel="stylesheet" href="/static/stylesheet.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-left">
+                <h1>Live2Audio</h1>
+                <span class="badge badge-success" id="system-status-badge">● ONLINE</span>
+            </div>
+            
+            <div class="header-center">
+                <div class="mini-stat">
+                    <span class="mini-stat-value" id="uptime-val">{{ uptime }}</span>
+                    <span class="mini-stat-label">Uptime</span>
+                </div>
+                <div class="mini-stat">
+                    <span class="mini-stat-value" id="live-count-val">{{ live_count }}</span>
+                    <span class="mini-stat-label">Live</span>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <button class="refresh-btn error-btn" onclick="openErrorModal()" id="errorBtn" style="display: {% if errors %}flex{% else %}none{% endif %};">⚠ Errors</button>
+                <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
+                <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh</button>
+            </div>
+        </header>
+
+        <section>
+            <h2>Station List Configuration</h2>
+            <div id="stream-list-container">
+                {% if streams %}
+                <div class="stream-list">
+                    {% for stream in streams %}
+                    <div class="stream-item">
+                        {% if stream.logo %}
+                        <img src="{{ stream.logo }}" class="stream-logo" alt="Logo">
+                        {% else %}
+                        <div class="stream-logo" style="background:#334155"></div>
+                        {% endif %}
+                        <div class="stream-info">
+                            <div style="display: flex; align-items: center;">
+                                {% if stream.listeners > 0 %}<span class="pulse"></span>{% endif %}
+                                <span style="font-weight: 500;">{{ stream.name }}</span>
+                                <span class="avail-dot avail-{{ stream.availability }}" title="Stream {{ stream.availability }}"></span>
+                            </div>
+                            <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }} {% if stream.listeners > 0 %}• {{ stream.listeners }} listening{% endif %}</span>
+                        </div>
+                        <div class="stream-actions">
+                            <button class="action-link" id="play-btn-{{ stream.id }}" onclick="togglePlayer('{{ stream.id }}')">▶ Play</button>
+                            <button class="action-link" onclick="openCastModal('{{ stream.id }}', '{{ stream.name }}')">📺 Cast</button>
+                            <button class="action-link" onclick="openEditModal('{{ stream.id }}', '{{ stream.name }}', '{{ stream.url }}', '{{ stream.group }}', '{{ stream.tvg_id }}')">✎ Edit</button>
+                            <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YT</a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>
+                {% endif %}
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Playback Bar -->
+    <div id="playback-bar" class="playback-bar">
+        <audio id="main-audio" preload="none"></audio>
+        <div class="playback-content">
+            <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='#334155'">
+            <div class="playback-info-text">
+                <span id="playback-station-name" class="playback-name">Station Name</span>
+                <span id="playback-status" class="playback-status">Currently Playing</span>
+            </div>
+        </div>
+        <div class="volume-container">
+            <button id="mute-btn" class="volume-icon" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center;" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
+            <input type="range" class="volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
+    </div>
+
+    <!-- Station Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h3 id="modalTitle">Add New Station</h3>
+            <input type="hidden" id="oldStationUrl">
+            <div class="form-group">
+                <label>YouTube URL or Video ID</label>
+                <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=...">
+            </div>
+            <div class="form-group">
+                <label>Station Name</label>
+                <input type="text" id="stationName" placeholder="Lofi Radio">
+            </div>
+            <div class="form-group">
+                <label>Station ID (Optional)</label>
+                <input type="text" id="stationId" placeholder="LofiGirl">
+            </div>
+            <div class="form-group">
+                <label>Group (Optional)</label>
+                <input type="text" id="stationGroup" placeholder="YouTube Radio">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="handleStationSubmit()" id="submitBtn">Save Station</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div class="modal-overlay" id="errorModalOverlay">
+        <div class="modal">
+            <h3 style="color: #ef4444;">Session Error Log</h3>
+            <div id="error-log-container-modal" class="error-list-modal">
+                <!-- Errors will be populated here -->
+            </div>
+            <div class="modal-actions" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeErrorModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cast Modal -->
+    <div class="modal-overlay" id="castModalOverlay">
+        <div class="modal">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 id="castModalTitle" style="margin: 0;">Cast to Device</h3>
+                <button class="refresh-btn" onclick="refreshDevices()" id="refreshDevicesBtn">↻ Refresh</button>
+            </div>
+            <p id="castStationName" style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 15px;"></p>
+            
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label>Manual Device entry (IP or Location URL)</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="manualDeviceIp" placeholder="192.168.1.100" style="flex: 1;">
+                    <button class="btn btn-primary" onclick="castToManualIp()" style="padding: 8px 12px; font-size: 0.8rem;">Cast to IP</button>
+                </div>
+            </div>
+
+            <div id="device-list" class="device-list">
+                <!-- Devices will be populated here -->
+                <p style="color: #64748b; font-style: italic; text-align: center;">Searching for devices...</p>
+            </div>
+            <div class="modal-actions" style="margin-top: 25px;">
+                <button class="btn btn-secondary" onclick="closeCastModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>const SERVER_ID = '{{ server_id }}';</script>
+    <script src="/static/script.js"></script>
+</body>
+</html>
