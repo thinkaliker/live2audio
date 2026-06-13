@@ -1,14 +1,18 @@
 #EXTM3U
-#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=jfKfPfyJRdk" group-title="YouTube Radio", Lofi Girl Radio
-http://localhost:5000/stream.mp3?v=jfKfPfyJRdk
+#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=X4VbdwhkE10" group-title="YouTube Radio", Lofi Girl Radio
+http://localhost:5000/stream.mp3?v=X4VbdwhkE10
 #EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=4xDzrJKXOOY" group-title="YouTube Radio", Lofi Girl Synthwave Radio
 http://localhost:5000/stream.mp3?v=4xDzrJKXOOY
-#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=28KRPhVzCus" group-title="YouTube Radio", Lofi Girl Sleep/Chill Radio
-http://localhost:5000/stream.mp3?v=28KRPhVzCus
-#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=TtkFsfOP9QI" group-title="YouTube Radio", Lofi Girl Piano Radio
-http://localhost:5000/stream.mp3?v=TtkFsfOP9QI
+#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=JD-kMIpDfnY" group-title="YouTube Radio", Lofi Girl Sleep/Chill Radio
+http://localhost:5000/stream.mp3?v=JD-kMIpDfnY
+#EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=N0snMcR6aaA" group-title="YouTube Radio", Lofi Girl Piano Radio
+http://localhost:5000/stream.mp3?v=N0snMcR6aaA
 #EXTINF:-1 tvg-id="LofiGirl" tvg-logo="http://localhost:5000/thumbnail.jpg?v=A8jDx9TLMQc" group-title="YouTube Radio", Lofi Girl Jazz Radio
 http://localhost:5000/stream.mp3?v=A8jDx9TLMQc
+#EXTINF:-1 tvg-id="" tvg-logo="http://localhost:5000/thumbnail.jpg?v=jXAEIWcGXwE" group-title="", Lofi Girl Classical Radio
+http://localhost:5000/stream.mp3?v=jXAEIWcGXwE
+#EXTINF:-1 tvg-id="" tvg-logo="http://localhost:5000/thumbnail.jpg?v=q_4KI-ChIIs" group-title="", Lofi Girl Fireplace
+http://localhost:5000/stream.mp3?v=q_4KI-ChIIs
 
 #EXTINF:-1 tvg-id="Chillhop" tvg-logo="http://localhost:5000/thumbnail.jpg?v=5yx6BWlEVcY" group-title="YouTube Radio", Chillhop Radio
 http://localhost:5000/stream.mp3?v=5yx6BWlEVcY
@@ -28,8 +32,8 @@ http://localhost:5000/stream.mp3?v=UedTcufyrHc
 http://localhost:5000/stream.mp3?v=5-anTj1QrWs
 #EXTINF:-1 tvg-id="NightrideFM" tvg-logo="http://localhost:5000/thumbnail.jpg?v=Y9q6RYg2Pdg" group-title="YouTube Radio", Datawave FM Radio
 http://localhost:5000/stream.mp3?v=Y9q6RYg2Pdg
-#EXTINF:-1 tvg-id="NightrideFM" tvg-logo="http://localhost:5000/thumbnail.jpg?v=uYfxDF_QR94" group-title="YouTube Radio", Nightride FM Radio
-http://localhost:5000/stream.mp3?v=uYfxDF_QR94
+#EXTINF:-1 tvg-id="NightrideFM" tvg-logo="http://localhost:5000/thumbnail.jpg?v=UjlMEqTu2KI" group-title="YouTube Radio", Nightride FM Radio
+http://localhost:5000/stream.mp3?v=UjlMEqTu2KI
 
 #EXTINF:-1 tvg-id="deadmau5" tvg-logo="http://localhost:5000/thumbnail.jpg?v=edqlOxtnvL0" group-title="YouTube Radio", deadmau5 Airplane Mode Radio
 http://localhost:5000/stream.mp3?v=edqlOxtnvL0

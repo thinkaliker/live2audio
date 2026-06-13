@@ -416,19 +416,30 @@ async function updateDashboard() {
         const container = document.getElementById('stream-list-container');
         if (data.streams.length > 0) {
             const playingId = sessionStorage.getItem('isPlaying');
-            let html = '<div class="stream-list">';
+
+            // Group by tvg_id preserving order
+            const groupMap = {};
+            const groupOrder = [];
             data.streams.forEach(stream => {
+                const key = stream.tvg_id || 'Other';
+                if (!groupMap[key]) { groupMap[key] = []; groupOrder.push(key); }
+                groupMap[key].push(stream);
+            });
+
+            const renderCard = (stream) => {
                 const isThisPlaying = stream.id === playingId;
-                html += `
+                const avail = stream.availability || 'checking';
+                const live = stream.listeners > 0 && avail === 'available';
+                const dotTitle = stream.listeners > 0 ? `${stream.listeners} listening` : avail;
+                return `
                 <div class="stream-item">
                     <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='#334155'">
                     <div class="stream-info">
                         <div style="display: flex; align-items: center;">
-                            ${stream.listeners > 0 ? '<span class="pulse"></span>' : ''}
-                            <span class="station-name-text" style="font-weight: 500;">${stream.name}</span>
-                            <span class="avail-dot avail-${stream.availability || 'checking'}" title="Stream ${stream.availability || 'checking'}"></span>
+                            <span class="avail-dot avail-${avail}${live ? ' live' : ''}" title="${dotTitle}"></span>
+                            <span class="station-name-text" style="font-weight: 500; margin-left: 2px;">${stream.name}</span>
                         </div>
-                        <span style="font-size: 0.7rem; color: #64748b;">ID: ${stream.id} ${stream.listeners > 0 ? '• ' + stream.listeners + ' listening' : ''}</span>
+                        <span style="font-size: 0.7rem; color: #64748b;">${stream.id}${stream.listeners > 0 ? ' • ' + stream.listeners + ' listening' : ''}</span>
                     </div>
                     <div class="stream-actions">
                         <button class="action-link" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${isThisPlaying ? '⏹ Stop' : '▶ Play'}</button>
@@ -437,8 +448,14 @@ async function updateDashboard() {
                         <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗ YT</a>
                     </div>
                 </div>`;
+            };
+
+            let html = '';
+            groupOrder.forEach(key => {
+                html += `<div class="stream-group"><div class="group-header">${key}</div><div class="stream-list">`;
+                groupMap[key].forEach(stream => { html += renderCard(stream); });
+                html += `</div></div>`;
             });
-            html += '</div>';
             container.innerHTML = html;
         } else {
             container.innerHTML = '<p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>';
@@ -535,6 +552,125 @@ async function refreshM3U() {
             btn.innerText = originalText;
             btn.disabled = false;
         }, 2000);
+    }
+}
+
+// ── Reorder Modal ─────────────────────────────────────────────────────────────
+
+let reorderData = [];   // flat array of stream objects in current order
+let dragSrcIdx = null;
+
+function openReorderModal() {
+    document.getElementById('reorderModalOverlay').style.display = 'flex';
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            reorderData = data.streams || [];
+            renderReorderList();
+        })
+        .catch(() => {
+            document.getElementById('reorder-list').innerHTML =
+                '<p style="color:#ef4444;text-align:center;">Failed to load stations.</p>';
+        });
+}
+
+function closeReorderModal() {
+    document.getElementById('reorderModalOverlay').style.display = 'none';
+    reorderData = [];
+    dragSrcIdx = null;
+}
+
+function renderReorderList() {
+    const list = document.getElementById('reorder-list');
+    if (!reorderData.length) {
+        list.innerHTML = '<p style="color:#64748b;text-align:center;font-style:italic;">No stations.</p>';
+        return;
+    }
+
+    let html = '';
+    let prevGroup = null;
+    reorderData.forEach((stream, idx) => {
+        const group = stream.tvg_id || 'Other';
+        if (group !== prevGroup) {
+            html += `<div class="reorder-group-label">${group}</div>`;
+            prevGroup = group;
+        }
+        html += `
+        <div class="reorder-item" draggable="true" data-idx="${idx}">
+            <span class="drag-handle">⠿</span>
+            <img class="reorder-thumb" src="${stream.logo || ''}" alt="" onerror="this.style.background='#334155'">
+            <span class="reorder-name">${stream.name}</span>
+        </div>`;
+    });
+    list.innerHTML = html;
+
+    list.querySelectorAll('.reorder-item').forEach(el => {
+        el.addEventListener('dragstart', onDragStart);
+        el.addEventListener('dragover',  onDragOver);
+        el.addEventListener('dragleave', onDragLeave);
+        el.addEventListener('drop',      onDrop);
+        el.addEventListener('dragend',   onDragEnd);
+    });
+}
+
+function onDragStart(e) {
+    dragSrcIdx = parseInt(e.currentTarget.dataset.idx);
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+function onDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    e.currentTarget.classList.add('drag-over');
+}
+
+function onDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    const dropIdx = parseInt(e.currentTarget.dataset.idx);
+    if (dragSrcIdx === null || dragSrcIdx === dropIdx) return;
+    const moved = reorderData.splice(dragSrcIdx, 1)[0];
+    reorderData.splice(dropIdx, 0, moved);
+    dragSrcIdx = null;
+    renderReorderList();
+}
+
+function onDragEnd(e) {
+    e.currentTarget.classList.remove('dragging');
+    dragSrcIdx = null;
+}
+
+async function saveOrder() {
+    const btn = document.getElementById('saveOrderBtn');
+    btn.disabled = true;
+    btn.innerText = 'Saving…';
+    try {
+        const resp = await fetch('/reorder_stations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: reorderData.map(s => s.id) })
+        });
+        const result = await resp.json();
+        if (result.status === 'success') {
+            btn.innerText = '✅ Saved';
+            setTimeout(() => {
+                closeReorderModal();
+                btn.innerText = 'Save Order';
+                btn.disabled = false;
+                updateDashboard();
+            }, 800);
+        } else {
+            btn.innerText = '❌ Error';
+            setTimeout(() => { btn.innerText = 'Save Order'; btn.disabled = false; }, 2000);
+        }
+    } catch {
+        btn.innerText = '❌ Failed';
+        setTimeout(() => { btn.innerText = 'Save Order'; btn.disabled = false; }, 2000);
     }
 }
 

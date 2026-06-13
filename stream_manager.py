@@ -231,6 +231,58 @@ def page_not_found(e):
         ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - 404: {request.path}")
     return "Not Found", 404
 
+@app.route('/reorder_stations', methods=['POST'])
+def reorder_stations():
+    ordered_ids = request.json.get('order', [])
+    m3u_path = "youtube.m3u"
+    try:
+        with open(m3u_path, 'r') as f:
+            lines = f.read().split('\n')
+
+        # Parse existing stations keyed by video_id
+        import re
+        stations = {}
+        i = 0
+        while i < len(lines):
+            if lines[i].startswith('#EXTINF:'):
+                extinf = lines[i]
+                url = lines[i + 1].strip() if i + 1 < len(lines) else ''
+                vid_id = 'Unknown'
+                if '?v=' in url:
+                    vid_id = url.split('?v=')[1].split('&')[0]
+                elif 'youtu.be/' in url:
+                    vid_id = url.split('youtu.be/')[1].split('?')[0]
+                if vid_id != 'Unknown':
+                    stations[vid_id] = (extinf, url)
+                i += 2
+            else:
+                i += 1
+
+        def get_tvg_id(extinf):
+            m = re.search(r'tvg-id="([^"]*)"', extinf)
+            return m.group(1) if m else ''
+
+        out = ['#EXTM3U']
+        prev_group = None
+        for vid_id in ordered_ids:
+            if vid_id not in stations:
+                continue
+            extinf, url = stations[vid_id]
+            group = get_tvg_id(extinf)
+            if prev_group is not None and group != prev_group:
+                out.append('')
+            out.append(extinf)
+            out.append(url)
+            prev_group = group
+
+        with open(m3u_path, 'w') as f:
+            f.write('\n'.join(out) + '\n')
+
+        get_available_streams()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/refresh_m3u', methods=['POST'])
 def refresh_m3u():
     print("Manual M3U refresh triggered...", flush=True)
@@ -550,19 +602,28 @@ def stop_dlna():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+def group_streams(streams):
+    groups = {}
+    for stream in streams:
+        key = stream['tvg_id'] or 'Other'
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(stream)
+    return list(groups.items())
+
 @app.route('/')
 def index():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
     streams = get_available_streams()
-    
+
     with STREAMS_LOCK:
         live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
-    
+
     return render_template(
         'index.html',
         server_id=SERVER_ID,
         uptime=uptime,
-        streams=streams,
+        grouped_streams=group_streams(streams),
         errors=list(ERROR_LOG),
         last_stream_name=LAST_STREAM["name"],
         live_count=live_count

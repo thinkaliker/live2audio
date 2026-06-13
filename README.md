@@ -1,9 +1,6 @@
 # live2audio
 
-A simple proxy to stream YouTube audio directly into Jellyfin (or any media player) without needing an intermediate Icecast server.
-
-## Why this is better
-The previous Icecast-based method required a persistent connection and a running Icecast instance. This new version is **on-demand**: it only starts downloading and transcoding the YouTube audio when you actually click "Play" in your player.
+A simple proxy to stream YouTube audio directly into Jellyfin (or any media player) without needing an intermediate Icecast server. Also includes a webpage to stream audio directly from. Mostly AI assisted.
 
 ## Setup
 

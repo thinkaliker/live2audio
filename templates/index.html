@@ -29,39 +29,43 @@
             <div class="header-right">
                 <button class="refresh-btn error-btn" onclick="openErrorModal()" id="errorBtn" style="display: {% if errors %}flex{% else %}none{% endif %};">⚠ Errors</button>
                 <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
+                <button class="refresh-btn" onclick="openReorderModal()" id="reorderBtn">↕ Order</button>
                 <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh</button>
             </div>
         </header>
 
         <section>
-            <h2>Station List Configuration</h2>
             <div id="stream-list-container">
-                {% if streams %}
-                <div class="stream-list">
-                    {% for stream in streams %}
-                    <div class="stream-item">
-                        {% if stream.logo %}
-                        <img src="{{ stream.logo }}" class="stream-logo" alt="Logo">
-                        {% else %}
-                        <div class="stream-logo" style="background:#334155"></div>
-                        {% endif %}
-                        <div class="stream-info">
-                            <div style="display: flex; align-items: center;">
-                                {% if stream.listeners > 0 %}<span class="pulse"></span>{% endif %}
-                                <span style="font-weight: 500;">{{ stream.name }}</span>
-                                <span class="avail-dot avail-{{ stream.availability }}" title="Stream {{ stream.availability }}"></span>
+                {% if grouped_streams %}
+                {% for group_name, group_streams in grouped_streams %}
+                <div class="stream-group">
+                    <div class="group-header">{{ group_name }}</div>
+                    <div class="stream-list">
+                        {% for stream in group_streams %}
+                        <div class="stream-item">
+                            {% if stream.logo %}
+                            <img src="{{ stream.logo }}" class="stream-logo" alt="Logo">
+                            {% else %}
+                            <div class="stream-logo" style="background:#334155"></div>
+                            {% endif %}
+                            <div class="stream-info">
+                                <div style="display: flex; align-items: center;">
+                                    <span class="avail-dot avail-{{ stream.availability }}{% if stream.listeners > 0 and stream.availability == 'available' %} live{% endif %}" title="{% if stream.listeners > 0 %}{{ stream.listeners }} listening{% else %}{{ stream.availability }}{% endif %}"></span>
+                                    <span style="font-weight: 500; margin-left: 2px;">{{ stream.name }}</span>
+                                </div>
+                                <span style="font-size: 0.7rem; color: #64748b;">{{ stream.id }}{% if stream.listeners > 0 %} • {{ stream.listeners }} listening{% endif %}</span>
                             </div>
-                            <span style="font-size: 0.7rem; color: #64748b;">ID: {{ stream.id }} {% if stream.listeners > 0 %}• {{ stream.listeners }} listening{% endif %}</span>
+                            <div class="stream-actions">
+                                <button class="action-link" id="play-btn-{{ stream.id }}" onclick="togglePlayer('{{ stream.id }}')">▶ Play</button>
+                                <button class="action-link" onclick="openCastModal('{{ stream.id }}', '{{ stream.name }}')">📺 Cast</button>
+                                <button class="action-link" onclick="openEditModal('{{ stream.id }}', '{{ stream.name }}', '{{ stream.url }}', '{{ stream.group }}', '{{ stream.tvg_id }}')">✎ Edit</button>
+                                <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YT</a>
+                            </div>
                         </div>
-                        <div class="stream-actions">
-                            <button class="action-link" id="play-btn-{{ stream.id }}" onclick="togglePlayer('{{ stream.id }}')">▶ Play</button>
-                            <button class="action-link" onclick="openCastModal('{{ stream.id }}', '{{ stream.name }}')">📺 Cast</button>
-                            <button class="action-link" onclick="openEditModal('{{ stream.id }}', '{{ stream.name }}', '{{ stream.url }}', '{{ stream.group }}', '{{ stream.tvg_id }}')">✎ Edit</button>
-                            <a href="https://www.youtube.com/watch?v={{ stream.id }}" class="action-link" target="_blank">↗ YT</a>
-                        </div>
+                        {% endfor %}
                     </div>
-                    {% endfor %}
                 </div>
+                {% endfor %}
                 {% else %}
                 <p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>
                 {% endif %}
@@ -73,18 +77,20 @@
     <!-- Playback Bar -->
     <div id="playback-bar" class="playback-bar">
         <audio id="main-audio" preload="none"></audio>
-        <div class="playback-content">
-            <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='#334155'">
-            <div class="playback-info-text">
-                <span id="playback-station-name" class="playback-name">Station Name</span>
-                <span id="playback-status" class="playback-status">Currently Playing</span>
+        <div class="playback-top">
+            <div class="playback-content">
+                <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='#334155'">
+                <div class="playback-info-text">
+                    <span id="playback-station-name" class="playback-name">Station Name</span>
+                    <span id="playback-status" class="playback-status">Currently Playing</span>
+                </div>
             </div>
+            <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
         </div>
         <div class="volume-container">
             <button id="mute-btn" class="volume-icon" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center;" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
             <input type="range" class="volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5">
         </div>
-        <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
     </div>
 
     <!-- Station Modal -->
@@ -151,6 +157,22 @@
             </div>
             <div class="modal-actions" style="margin-top: 25px;">
                 <button class="btn btn-secondary" onclick="closeCastModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reorder Modal -->
+    <div class="modal-overlay" id="reorderModalOverlay">
+        <div class="modal reorder-modal">
+            <div class="reorder-modal-header">
+                <h3 style="margin: 0;">Reorder Stations</h3>
+                <button class="btn btn-secondary" onclick="closeReorderModal()" style="padding: 6px 12px; font-size: 0.8rem;">✕</button>
+            </div>
+            <p style="font-size: 0.75rem; color: #64748b; margin: 8px 0 12px;">Drag to reorder. Blank lines separate groups in the saved file.</p>
+            <div id="reorder-list" class="reorder-list"></div>
+            <div class="modal-actions" style="margin-top: 16px;">
+                <button class="btn btn-secondary" onclick="closeReorderModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveOrder()" id="saveOrderBtn">Save Order</button>
             </div>
         </div>
     </div>
