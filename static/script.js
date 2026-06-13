@@ -20,6 +20,7 @@ function updatePlayBtns(activeId) {
     document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
         const isActive = activeId != null && btn.id === `play-btn-${activeId}`;
         btn.innerText = isActive ? '⏹' : '▶';
+        btn.title = isActive ? 'Stop' : 'Play';
         btn.classList.toggle('playing', isActive);
     });
 }
@@ -537,10 +538,10 @@ async function updateDashboard() {
                                 <span class="stream-sub">${subText}</span>
                             </div>
                             <div class="stream-actions">
-                                <button class="action-link${stream.id === playingId ? ' playing' : ''}" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${stream.id === playingId ? '⏹' : '▶'}</button>
-                                <button class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺</button>
-                                <button class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎</button>
-                                <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗</a>
+                                <button title="Play" class="action-link${stream.id === playingId ? ' playing' : ''}" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${stream.id === playingId ? '⏹' : '▶'}</button>
+                                <button title="Cast" class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺</button>
+                                <button title="Edit" class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎</button>
+                                <a title="YouTube" href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗</a>
                             </div>`;
                         listEl.appendChild(item);
 
