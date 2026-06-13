@@ -138,7 +138,7 @@ async function castToDevice(udn, castEvent) {
             
             // Update local play buttons
             document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-                btn.innerText = btn.id === `play-btn-${currentCastStreamId}` ? "⏹ Stop" : "▶ Play";
+                btn.innerText = btn.id === `play-btn-${currentCastStreamId}` ? "⏹" : "▶";
             });
 
             closeCastModal();
@@ -186,7 +186,7 @@ function clearPlaybackState() {
 
     // Reset all play buttons
     document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-        btn.innerText = "▶ Play";
+        btn.innerText = "▶";
     });
 
     // Update dynamic favicon and stats
@@ -240,7 +240,7 @@ function togglePlayer(id) {
 
     // Update UI state
     document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-        btn.innerText = btn.id === `play-btn-${id}` ? "⏹ Stop" : "▶ Play";
+        btn.innerText = btn.id === `play-btn-${id}` ? "⏹" : "▶";
     });
 
     // Update and show playback bar
@@ -426,39 +426,112 @@ async function updateDashboard() {
                 groupMap[key].push(stream);
             });
 
-            const renderCard = (stream) => {
-                const isThisPlaying = stream.id === playingId;
-                const avail = stream.availability || 'checking';
-                const live = stream.listeners > 0 && avail === 'available';
-                const dotTitle = stream.listeners > 0 ? `${stream.listeners} listening` : avail;
-                return `
-                <div class="stream-item">
-                    <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='#334155'">
-                    <div class="stream-info">
-                        <div style="display: flex; align-items: center;">
-                            <span class="avail-dot avail-${avail}${live ? ' live' : ''}" title="${dotTitle}"></span>
-                            <span class="station-name-text" style="font-weight: 500; margin-left: 2px;">${stream.name}</span>
-                        </div>
-                        <span style="font-size: 0.7rem; color: #64748b;">${stream.id}${stream.listeners > 0 ? ' • ' + stream.listeners + ' listening' : ''}</span>
-                    </div>
-                    <div class="stream-actions">
-                        <button class="action-link" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${isThisPlaying ? '⏹ Stop' : '▶ Play'}</button>
-                        <button class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺 Cast</button>
-                        <button class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎ Edit</button>
-                        <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗ YT</a>
-                    </div>
-                </div>`;
-            };
-
-            let html = '';
-            groupOrder.forEach(key => {
-                html += `<div class="stream-group"><div class="group-header">${key}</div><div class="stream-list">`;
-                groupMap[key].forEach(stream => { html += renderCard(stream); });
-                html += `</div></div>`;
+            // Build index of existing stream-item elements keyed by stream id
+            const existingItems = {};
+            container.querySelectorAll('.stream-item[data-stream-id]').forEach(el => {
+                existingItems[el.dataset.streamId] = el;
             });
-            container.innerHTML = html;
+
+            // Build/update group containers, patching existing items in place
+            const seenIds = new Set();
+            const seenGroups = new Set();
+
+            groupOrder.forEach(key => {
+                seenGroups.add(key);
+                let groupEl = container.querySelector(`.stream-group[data-group="${CSS.escape(key)}"]`);
+                if (!groupEl) {
+                    groupEl = document.createElement('div');
+                    groupEl.className = 'stream-group';
+                    groupEl.dataset.group = key;
+                    groupEl.innerHTML = `<div class="group-header">${key}</div><div class="stream-list"></div>`;
+                    container.appendChild(groupEl);
+                }
+                const listEl = groupEl.querySelector('.stream-list');
+
+                groupMap[key].forEach((stream, idx) => {
+                    seenIds.add(stream.id);
+                    const avail = stream.availability || 'checking';
+                    const live = stream.listeners > 0 && avail === 'available';
+                    const dotTitle = stream.listeners > 0 ? `${stream.listeners} listening` : avail;
+                    const subText = `${stream.id}${stream.listeners > 0 ? ' • ' + stream.listeners + ' listening' : ''}`;
+
+                    let item = existingItems[stream.id];
+                    if (!item) {
+                        // Create new element only when it doesn't exist yet
+                        item = document.createElement('div');
+                        item.className = 'stream-item';
+                        item.dataset.streamId = stream.id;
+                        item.innerHTML = `
+                            <span class="avail-dot avail-${avail}${live ? ' live' : ''}" title="${dotTitle}"></span>
+                            <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='#334155'">
+                            <div class="stream-info">
+                                <div class="stream-name-wrapper">
+                                    <span class="station-name-text">${stream.name}</span>
+                                </div>
+                                <span class="stream-sub">${subText}</span>
+                            </div>
+                            <div class="stream-actions">
+                                <button class="action-link" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${stream.id === playingId ? '⏹' : '▶'}</button>
+                                <button class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺</button>
+                                <button class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎</button>
+                                <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗</a>
+                            </div>`;
+                        listEl.appendChild(item);
+
+                        // Measure marquee after insert
+                        const nameEl = item.querySelector('.station-name-text');
+                        const overflow = nameEl.scrollWidth - nameEl.parentElement.clientWidth;
+                        if (overflow > 0) {
+                            nameEl.style.setProperty('--marquee-offset', `-${overflow}px`);
+                            nameEl.style.animationPlayState = 'running';
+                        }
+                    } else {
+                        // Patch only changed attributes on existing element
+                        const dot = item.querySelector('.avail-dot');
+                        const dotClass = `avail-dot avail-${avail}${live ? ' live' : ''}`;
+                        if (dot.className !== dotClass) dot.className = dotClass;
+                        if (dot.title !== dotTitle) dot.title = dotTitle;
+
+                        const sub = item.querySelector('.stream-sub');
+                        if (sub.textContent !== subText) sub.textContent = subText;
+
+                        const playBtn = item.querySelector(`#play-btn-${stream.id}`);
+                        const wantedLabel = stream.id === playingId ? '⏹' : '▶';
+                        if (playBtn && playBtn.innerText !== wantedLabel) playBtn.innerText = wantedLabel;
+
+                        // Move into correct group list if it changed groups
+                        if (item.parentElement !== listEl) {
+                            const ref = listEl.children[idx] || null;
+                            listEl.insertBefore(item, ref);
+                        } else if (listEl.children[idx] !== item) {
+                            // Already in right list but wrong position — insertBefore the element
+                            // currently at idx (which shifts down), only if truly misplaced
+                            const ref = listEl.children[idx] || null;
+                            listEl.insertBefore(item, ref);
+                        }
+                    }
+                });
+            });
+
+            // Remove items that no longer exist in data
+            Object.entries(existingItems).forEach(([id, el]) => {
+                if (!seenIds.has(id)) el.remove();
+            });
+
+            // Remove groups that no longer exist
+            container.querySelectorAll('.stream-group[data-group]').forEach(el => {
+                if (!seenGroups.has(el.dataset.group)) el.remove();
+            });
+
+            // Ensure group order matches groupOrder — only move if position is wrong
+            groupOrder.forEach((key, idx) => {
+                const groupEl = container.querySelector(`.stream-group[data-group="${CSS.escape(key)}"]`);
+                if (groupEl && container.children[idx] !== groupEl) {
+                    container.insertBefore(groupEl, container.children[idx] || null);
+                }
+            });
         } else {
-            container.innerHTML = '<p style="color: #64748b; font-style: italic;">No stations found in youtube.m3u.</p>';
+            container.innerHTML = '<p style="color: var(--text-dim); font-style: italic;">No stations found in youtube.m3u.</p>';
         }
 
         // Update errors
@@ -490,8 +563,10 @@ async function handleStationSubmit() {
     const oldUrl = document.getElementById('oldStationUrl').value;
     const url = document.getElementById('stationUrl').value;
     const name = document.getElementById('stationName').value;
-    const id = document.getElementById('stationId').value;
-    const group = document.getElementById('stationGroup').value;
+    const idEl = document.getElementById('stationId');
+    const groupEl = document.getElementById('stationGroup');
+    const id = idEl.value || idEl.placeholder;
+    const group = groupEl.value || groupEl.placeholder;
     const btn = document.getElementById('submitBtn');
 
     if (!url || !name) return alert('URL and Name are required');

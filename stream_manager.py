@@ -602,30 +602,15 @@ def stop_dlna():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
-def group_streams(streams):
-    groups = {}
-    for stream in streams:
-        key = stream['tvg_id'] or 'Other'
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(stream)
-    return list(groups.items())
-
 @app.route('/')
 def index():
     uptime = str(datetime.now() - START_TIME).split('.')[0]
-    streams = get_available_streams()
-
     with STREAMS_LOCK:
         live_count = sum(1 for count in ACTIVE_STREAMS.values() if count > 0)
-
     return render_template(
         'index.html',
         server_id=SERVER_ID,
         uptime=uptime,
-        grouped_streams=group_streams(streams),
-        errors=list(ERROR_LOG),
-        last_stream_name=LAST_STREAM["name"],
         live_count=live_count
     )
 
@@ -767,7 +752,7 @@ if __name__ == '__main__':
     # Pre-populate map when running locally
     get_available_streams()
     start_discovery_thread()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)
 else:
     # Pre-populate map when running under Gunicorn
     get_available_streams()
