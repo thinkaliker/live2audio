@@ -1,5 +1,42 @@
 let currentCastStreamId = null;
 
+function initTheme() {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'light' || stored === 'dark') {
+        document.documentElement.dataset.theme = stored;
+    } else {
+        delete document.documentElement.dataset.theme;
+    }
+    updateThemeBtn(stored || 'auto');
+}
+
+function updateThemeBtn(mode) {
+    const btn = document.getElementById('themeBtn');
+    if (!btn) return;
+    btn.innerText = { auto: '🕘', light: '☀️', dark: '🌙' }[mode] || '🕘';
+}
+
+function updatePlayBtns(activeId) {
+    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+        const isActive = activeId != null && btn.id === `play-btn-${activeId}`;
+        btn.innerText = isActive ? '⏹' : '▶';
+        btn.classList.toggle('playing', isActive);
+    });
+}
+
+function cycleTheme() {
+    const current = localStorage.getItem('theme') || 'auto';
+    const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
+    if (next === 'auto') {
+        localStorage.removeItem('theme');
+        delete document.documentElement.dataset.theme;
+    } else {
+        localStorage.setItem('theme', next);
+        document.documentElement.dataset.theme = next;
+    }
+    updateThemeBtn(next);
+}
+
 function safeSetText(id, text) {
     const el = document.getElementById(id);
     if (el) {
@@ -28,7 +65,7 @@ async function loadDevices() {
         const devices = await response.json();
         
         if (devices.length === 0) {
-            list.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">No DLNA devices found. Try refreshing.</p>';
+            list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No DLNA devices found. Try refreshing.</p>';
             return;
         }
         
@@ -45,7 +82,7 @@ async function loadDevices() {
         });
         list.innerHTML = html;
     } catch (e) {
-        list.innerHTML = '<p style="color: #ef4444; font-style: italic; text-align: center;">Failed to load devices.</p>';
+        list.innerHTML = '<p style="color: var(--error); font-style: italic; text-align: center;">Failed to load devices.</p>';
     }
 }
 
@@ -56,19 +93,19 @@ async function refreshDevices() {
     
     btn.innerText = '⌛ Scanning...';
     btn.disabled = true;
-    list.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">Scanning for devices...</p>';
+    list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">Scanning for devices...</p>';
     
     try {
         const response = await fetch('/api/dlna/refresh', { method: 'POST' });
         const devices = await response.json();
         
         if (devices.length === 0) {
-            list.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">No DLNA devices found.</p>';
+            list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No DLNA devices found.</p>';
         } else {
             loadDevices();
         }
     } catch (e) {
-        list.innerHTML = '<p style="color: #ef4444; font-style: italic; text-align: center;">Scan failed.</p>';
+        list.innerHTML = '<p style="color: var(--error); font-style: italic; text-align: center;">Scan failed.</p>';
     } finally {
         btn.innerText = originalText;
         btn.disabled = false;
@@ -137,9 +174,7 @@ async function castToDevice(udn, castEvent) {
             }
             
             // Update local play buttons
-            document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-                btn.innerText = btn.id === `play-btn-${currentCastStreamId}` ? "⏹" : "▶";
-            });
+            updatePlayBtns(currentCastStreamId);
 
             closeCastModal();
         } else {
@@ -185,9 +220,7 @@ function clearPlaybackState() {
     }
 
     // Reset all play buttons
-    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-        btn.innerText = "▶";
-    });
+    updatePlayBtns(null);
 
     // Update dynamic favicon and stats
     updateDashboard();
@@ -239,9 +272,7 @@ function togglePlayer(id) {
     sessionStorage.setItem('isPlaying', id);
 
     // Update UI state
-    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-        btn.innerText = btn.id === `play-btn-${id}` ? "⏹" : "▶";
-    });
+    updatePlayBtns(id);
 
     // Update and show playback bar
     const item = document.getElementById(`play-btn-${id}`).closest('.stream-item');
@@ -285,17 +316,12 @@ function restoreUIState() {
     }
 
     // Update play buttons on the page (they might be re-rendered by updateDashboard)
-    setTimeout(() => {
-        document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-            if (btn.id === `play-btn-${isPlaying}`) {
-                btn.innerText = "⏹ Stop";
-            }
-        });
-    }, 500);
+    setTimeout(() => updatePlayBtns(isPlaying), 500);
 }
 
 // Global volume control listener
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     const currentServerId = SERVER_ID;
     const storedServerId = sessionStorage.getItem('server_id');
     
@@ -361,6 +387,7 @@ function openModal() {
     document.getElementById('stationName').value = "";
     document.getElementById('stationId').value = "";
     document.getElementById('stationGroup').value = "";
+    document.getElementById('deleteBtn').style.display = 'none';
     document.getElementById('modalOverlay').style.display = 'flex';
 }
 
@@ -371,7 +398,46 @@ function openEditModal(id, name, url, group, tvg_id) {
     document.getElementById('stationName').value = name;
     document.getElementById('stationId').value = tvg_id;
     document.getElementById('stationGroup').value = group;
+    document.getElementById('deleteBtn').style.display = 'inline-flex';
     document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function openDeleteConfirmModal() {
+    const name = document.getElementById('stationName').value;
+    document.getElementById('deleteConfirmText').innerText = `Delete "${name}"? This will remove it from the M3U file and cannot be undone.`;
+    document.getElementById('deleteConfirmOverlay').style.display = 'flex';
+}
+
+function closeDeleteConfirmModal() {
+    document.getElementById('deleteConfirmOverlay').style.display = 'none';
+}
+
+async function confirmDeleteStation() {
+    const url = document.getElementById('oldStationUrl').value;
+    const btn = document.getElementById('confirmDeleteBtn');
+    btn.disabled = true;
+    btn.innerText = 'Deleting...';
+
+    try {
+        const response = await fetch('/delete_station', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        if (response.ok) {
+            closeDeleteConfirmModal();
+            closeModal();
+            updateDashboard();
+        } else {
+            const err = await response.json();
+            alert('Error: ' + err.message);
+        }
+    } catch (e) {
+        alert('Request failed');
+    } finally {
+        btn.disabled = false;
+        btn.innerText = 'Delete';
+    }
 }
 
 function closeModal() {
@@ -463,7 +529,7 @@ async function updateDashboard() {
                         item.dataset.streamId = stream.id;
                         item.innerHTML = `
                             <span class="avail-dot avail-${avail}${live ? ' live' : ''}" title="${dotTitle}"></span>
-                            <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='#334155'">
+                            <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='var(--logo-placeholder)'">
                             <div class="stream-info">
                                 <div class="stream-name-wrapper">
                                     <span class="station-name-text">${stream.name}</span>
@@ -471,19 +537,20 @@ async function updateDashboard() {
                                 <span class="stream-sub">${subText}</span>
                             </div>
                             <div class="stream-actions">
-                                <button class="action-link" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${stream.id === playingId ? '⏹' : '▶'}</button>
+                                <button class="action-link${stream.id === playingId ? ' playing' : ''}" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${stream.id === playingId ? '⏹' : '▶'}</button>
                                 <button class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺</button>
                                 <button class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎</button>
                                 <a href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗</a>
                             </div>`;
                         listEl.appendChild(item);
 
-                        // Measure marquee after insert
+                        // Measure marquee after insert, play once then rely on hover
                         const nameEl = item.querySelector('.station-name-text');
                         const overflow = nameEl.scrollWidth - nameEl.parentElement.clientWidth;
                         if (overflow > 0) {
                             nameEl.style.setProperty('--marquee-offset', `-${overflow}px`);
-                            nameEl.style.animationPlayState = 'running';
+                            nameEl.classList.add('init-play');
+                            nameEl.addEventListener('animationend', () => nameEl.classList.remove('init-play'), { once: true });
                         }
                     } else {
                         // Patch only changed attributes on existing element
@@ -496,8 +563,12 @@ async function updateDashboard() {
                         if (sub.textContent !== subText) sub.textContent = subText;
 
                         const playBtn = item.querySelector(`#play-btn-${stream.id}`);
-                        const wantedLabel = stream.id === playingId ? '⏹' : '▶';
-                        if (playBtn && playBtn.innerText !== wantedLabel) playBtn.innerText = wantedLabel;
+                        const isActive = stream.id === playingId;
+                        const wantedLabel = isActive ? '⏹' : '▶';
+                        if (playBtn) {
+                            if (playBtn.innerText !== wantedLabel) playBtn.innerText = wantedLabel;
+                            playBtn.classList.toggle('playing', isActive);
+                        }
 
                         // Move into correct group list if it changed groups
                         if (item.parentElement !== listEl) {
@@ -546,7 +617,7 @@ async function updateDashboard() {
             errorContainer.innerHTML = errorHtml;
             errorBtn.style.display = 'flex';
         } else {
-            errorContainer.innerHTML = '<p style="color: #64748b; font-style: italic; text-align: center;">No errors reported in this session.</p>';
+            errorContainer.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No errors reported in this session.</p>';
             errorBtn.style.display = 'none';
         }
     } catch (e) {
@@ -658,7 +729,7 @@ function closeReorderModal() {
 function renderReorderList() {
     const list = document.getElementById('reorder-list');
     if (!reorderData.length) {
-        list.innerHTML = '<p style="color:#64748b;text-align:center;font-style:italic;">No stations.</p>';
+        list.innerHTML = '<p style="color:var(--text-dim);text-align:center;font-style:italic;">No stations.</p>';
         return;
     }
 
@@ -673,7 +744,7 @@ function renderReorderList() {
         html += `
         <div class="reorder-item" draggable="true" data-idx="${idx}">
             <span class="drag-handle">⠿</span>
-            <img class="reorder-thumb" src="${stream.logo || ''}" alt="" onerror="this.style.background='#334155'">
+            <img class="reorder-thumb" src="${stream.logo || ''}" alt="" onerror="this.style.background='var(--logo-placeholder)'">
             <span class="reorder-name">${stream.name}</span>
         </div>`;
     });

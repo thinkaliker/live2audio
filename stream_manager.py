@@ -396,6 +396,44 @@ def edit_station():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/delete_station', methods=['POST'])
+def delete_station():
+    data = request.json
+    url = data.get('url', '').strip()
+
+    if not url:
+        return jsonify({"status": "error", "message": "URL is required"}), 400
+
+    m3u_path = "youtube.m3u"
+    try:
+        with open(m3u_path, 'r') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        i = 0
+        found = False
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith('#EXTINF:'):
+                next_line = lines[i+1].strip() if i+1 < len(lines) else ""
+                if next_line == url:
+                    found = True
+                    i += 2
+                    continue
+            new_lines.append(line)
+            i += 1
+
+        if not found:
+            return jsonify({"status": "error", "message": "Station not found"}), 404
+
+        with open(m3u_path, 'w') as f:
+            f.writelines(new_lines)
+
+        get_available_streams()
+        return jsonify({"status": "success", "message": "Station deleted"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/api/dlna/devices')
 def get_dlna_devices():
     with DEVICES_LOCK:
