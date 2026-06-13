@@ -1,12 +1,21 @@
 # live2audio
 
-A simple proxy to stream YouTube audio directly into Jellyfin (or any media player) without needing an intermediate Icecast server. Also includes a webpage to stream audio directly from. Mostly AI assisted.
+A simple proxy to stream YouTube livestream audio directly into Jellyfin (or any media player). Also includes a webpage to stream audio directly in your browser. Mostly AI assisted.
+
+## Screenshots
+
+![Light mode](screenshot_light.png) ![Dark mode](screenshot_dark.png)
 
 ## Setup
 
 1. **Start the service**:
    ```bash
    docker-compose up -d
+   ```
+
+   Or if you prefer Python
+   ```bash
+   python stream_manager.py
    ```
 
 2. **Add to Jellyfin**:
