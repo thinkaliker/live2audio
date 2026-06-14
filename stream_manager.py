@@ -23,6 +23,7 @@ LAST_STREAM = {"name": "None", "time": "Never"}
 VIDEO_ID_MAP = {}  # Map video_id to station name
 ACTIVE_STREAMS = {}  # Map video_id to count of active listeners
 STREAMS_LOCK = threading.Lock()
+LAST_GOOD_STREAMS = []  # Cache of last successful parse result
 
 # DLNA Discovery
 DLNA_DEVICES = []
@@ -142,82 +143,85 @@ def build_youtube_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
 def get_available_streams():
-    global VIDEO_ID_MAP
+    global VIDEO_ID_MAP, LAST_GOOD_STREAMS
     streams = []
     temp_map = {}
     m3u_path = "youtube.m3u"
-    
-    if os.path.exists(m3u_path):
-        try:
-            import re
-            with open(m3u_path, 'r') as f:
-                content = f.read()
-                lines = content.split('\n')
-                for i in range(len(lines)):
-                    if lines[i].startswith('#EXTINF:'):
-                        info = lines[i]
-                        url_line = lines[i+1].strip() if i+1 < len(lines) else ""
-                        name = info.split(',')[-1].strip()
-                        
-                        # Extract metadata using regex
-                        tvg_id_match = re.search(r'tvg-id="([^"]*)"', info)
-                        group_match = re.search(r'group-title="([^"]*)"', info)
-                        
-                        tvg_id = tvg_id_match.group(1) if tvg_id_match else "Manual"
-                        group = group_match.group(1) if group_match else "YouTube Radio"
 
-                        # Extract video ID from URL
-                        vid_id = "Unknown"
-                        if "?v=" in url_line:
-                            vid_id = url_line.split("?v=")[1].split("&")[0]
-                        elif "youtu.be/" in url_line:
-                            vid_id = url_line.split("youtu.be/")[1].split("?")[0]
-                        
-                        temp_map[vid_id] = name
+    if not os.path.exists(m3u_path):
+        print(f"M3U not found at '{os.path.abspath(m3u_path)}', returning cached streams ({len(LAST_GOOD_STREAMS)})", flush=True)
+        return LAST_GOOD_STREAMS
 
-                        # Always use local thumbnail proxy for dashboard to avoid localhost issues
-                        logo = f"/thumbnail.jpg?v={vid_id}"
-                        with STREAMS_LOCK:
-                            listeners = ACTIVE_STREAMS.get(vid_id, 0)
+    try:
+        import re
+        with open(m3u_path, 'r') as f:
+            content = f.read()
+            lines = content.split('\n')
+            for i in range(len(lines)):
+                if lines[i].startswith('#EXTINF:'):
+                    info = lines[i]
+                    url_line = lines[i+1].strip() if i+1 < len(lines) else ""
+                    name = info.split(',')[-1].strip()
 
-                        with AVAILABILITY_LOCK:
-                            avail_status = STREAM_AVAILABILITY.get(vid_id, "checking")
-                            if vid_id not in STREAM_AVAILABILITY and vid_id != "Unknown":
-                                STREAM_AVAILABILITY[vid_id] = "checking"
+                    tvg_id_match = re.search(r'tvg-id="([^"]*)"', info)
+                    group_match = re.search(r'group-title="([^"]*)"', info)
+
+                    tvg_id = tvg_id_match.group(1) if tvg_id_match else "Manual"
+                    group = group_match.group(1) if group_match else "YouTube Radio"
+
+                    vid_id = "Unknown"
+                    if "?v=" in url_line:
+                        vid_id = url_line.split("?v=")[1].split("&")[0]
+                    elif "youtu.be/" in url_line:
+                        vid_id = url_line.split("youtu.be/")[1].split("?")[0]
+
+                    temp_map[vid_id] = name
+
+                    logo = f"/thumbnail.jpg?v={vid_id}"
+                    with STREAMS_LOCK:
+                        listeners = ACTIVE_STREAMS.get(vid_id, 0)
+
+                    with AVAILABILITY_LOCK:
+                        avail_status = STREAM_AVAILABILITY.get(vid_id, "checking")
+                        if vid_id not in STREAM_AVAILABILITY and vid_id != "Unknown":
+                            STREAM_AVAILABILITY[vid_id] = "checking"
+                            try:
+                                threading.Thread(target=check_stream_availability, args=(vid_id,), daemon=True).start()
+                            except RuntimeError as e:
+                                print(f"[{vid_id}] Could not start availability thread: {e}", flush=True)
+
+                    streams.append({
+                        "name": name,
+                        "url": url_line,
+                        "logo": logo,
+                        "id": vid_id,
+                        "tvg_id": tvg_id,
+                        "group": group,
+                        "listeners": listeners,
+                        "availability": avail_status
+                    })
+
+                    if vid_id and vid_id != "Unknown":
+                        cache_path = os.path.join(CACHE_DIR, f"{vid_id}.jpg")
+                        if not os.path.exists(cache_path):
+                            with DOWNLOADS_LOCK:
+                                should_start = vid_id not in PENDING_DOWNLOADS
+                            if should_start:
                                 try:
-                                    threading.Thread(target=check_stream_availability, args=(vid_id,), daemon=True).start()
+                                    threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
                                 except RuntimeError as e:
-                                    print(f"[{vid_id}] Could not start availability thread: {e}", flush=True)
+                                    print(f"[{vid_id}] Could not start thumbnail thread: {e}", flush=True)
 
-                        streams.append({
-                            "name": name,
-                            "url": url_line,
-                            "logo": logo,
-                            "id": vid_id,
-                            "tvg_id": tvg_id,
-                            "group": group,
-                            "listeners": listeners,
-                            "availability": avail_status
-                        })
-                        
-                        # Cache in background only if needed to prevent thread exhaustion
-                        if vid_id and vid_id != "Unknown":
-                            cache_path = os.path.join(CACHE_DIR, f"{vid_id}.jpg")
-                            if not os.path.exists(cache_path):
-                                with DOWNLOADS_LOCK:
-                                    should_start = vid_id not in PENDING_DOWNLOADS
-                                if should_start:
-                                    try:
-                                        threading.Thread(target=cache_thumbnail, args=(vid_id,), daemon=True).start()
-                                    except RuntimeError as e:
-                                        print(f"[{vid_id}] Could not start thumbnail thread: {e}", flush=True)
-            
-            # Atomic update of the global map to prevent race conditions
-            VIDEO_ID_MAP = temp_map
-        except Exception as e:
-            print(f"M3U Parse Error: {e}", flush=True)
-            with LOG_LOCK:
-                ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - M3U Parse Error: {str(e)}")
+        VIDEO_ID_MAP = temp_map
+        if streams:
+            LAST_GOOD_STREAMS = streams
+    except Exception as e:
+        print(f"M3U Parse Error: {e}", flush=True)
+        with LOG_LOCK:
+            ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - M3U Parse Error: {str(e)}")
+        if LAST_GOOD_STREAMS:
+            print(f"Returning last good streams ({len(LAST_GOOD_STREAMS)} stations)", flush=True)
+            return LAST_GOOD_STREAMS
     return streams
 
 @app.before_request

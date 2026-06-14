@@ -602,7 +602,9 @@ async function updateDashboard() {
                     container.insertBefore(groupEl, container.children[idx] || null);
                 }
             });
-        } else {
+        } else if (!container.querySelector('.stream-group')) {
+            // Only show "no stations" if we've never populated — empty response when list
+            // already exists is a transient server-side failure, don't wipe the display
             container.innerHTML = '<p style="color: var(--text-dim); font-style: italic;">No stations found in youtube.m3u.</p>';
         }
 
