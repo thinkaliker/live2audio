@@ -177,7 +177,7 @@ header {
     padding: 15px;
     font-family: monospace;
     font-size: 0.8rem;
-    color: var(--error-light);
+    color: var(--error);
     margin-top: 15px;
 }
 .error-list-modal div {
