@@ -24,6 +24,10 @@ VIDEO_ID_MAP = {}  # Map video_id to station name
 ACTIVE_STREAMS = {}  # Map video_id to count of active listeners
 STREAMS_LOCK = threading.Lock()
 LAST_GOOD_STREAMS = []  # Cache of last successful parse result
+# Serializes all youtube.m3u reads/writes. Reentrant because write handlers call
+# get_available_streams() while holding it. Single-file bind mount rules out atomic
+# rename, so we instead guarantee no read overlaps a truncating write.
+M3U_LOCK = threading.RLock()
 
 # DLNA Discovery
 DLNA_DEVICES = []
@@ -152,9 +156,15 @@ def get_available_streams():
         print(f"M3U not found at '{os.path.abspath(m3u_path)}', returning cached streams ({len(LAST_GOOD_STREAMS)})", flush=True)
         return LAST_GOOD_STREAMS
 
+    # A 0-byte file means we caught a write mid-truncation (or it was clobbered).
+    # Never a legitimate state — even an empty playlist keeps the #EXTM3U header.
+    if os.path.getsize(m3u_path) == 0 and LAST_GOOD_STREAMS:
+        print(f"M3U is empty (likely mid-write), returning cached streams ({len(LAST_GOOD_STREAMS)})", flush=True)
+        return LAST_GOOD_STREAMS
+
     try:
         import re
-        with open(m3u_path, 'r') as f:
+        with M3U_LOCK, open(m3u_path, 'r') as f:
             content = f.read()
             lines = content.split('\n')
             for i in range(len(lines)):
@@ -279,7 +289,7 @@ def reorder_stations():
             out.append(url)
             prev_group = group
 
-        with open(m3u_path, 'w') as f:
+        with M3U_LOCK, open(m3u_path, 'w') as f:
             f.write('\n'.join(out) + '\n')
 
         get_available_streams()
@@ -330,7 +340,7 @@ def add_station():
     # Append to M3U
     m3u_path = "youtube.m3u"
     try:
-        with open(m3u_path, 'a') as f:
+        with M3U_LOCK, open(m3u_path, 'a') as f:
             f.write(f'\n#EXTINF:-1 tvg-id="{tvg_id}" tvg-logo="http://localhost:5000/thumbnail.jpg?v={vid_id}" group-title="{group}", {name}\n')
             f.write(f'{stream_url}\n')
         
@@ -392,7 +402,7 @@ def edit_station():
         if not found:
             return jsonify({"status": "error", "message": "Original station not found"}), 404
 
-        with open(m3u_path, 'w') as f:
+        with M3U_LOCK, open(m3u_path, 'w') as f:
             f.writelines(new_lines)
 
         get_available_streams()
@@ -430,7 +440,7 @@ def delete_station():
         if not found:
             return jsonify({"status": "error", "message": "Station not found"}), 404
 
-        with open(m3u_path, 'w') as f:
+        with M3U_LOCK, open(m3u_path, 'w') as f:
             f.writelines(new_lines)
 
         get_available_streams()
@@ -771,9 +781,21 @@ def get_thumbnail():
     if not os.path.exists(cache_path):
         print(f"Caching thumbnail for {video_id}...", flush=True)
         url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-        # Download using curl
-        subprocess.run(['curl', '-s', '-L', '-o', cache_path, url])
-        
+        # Timeouts are mandatory: without them a stalled CDN pins this gunicorn
+        # thread forever, and 4 such stalls exhaust the whole worker pool.
+        result = subprocess.run(
+            ['curl', '-s', '-f', '-L', '--connect-timeout', '5', '--max-time', '10', '-o', cache_path, url],
+            capture_output=True
+        )
+        if result.returncode != 0:
+            # Don't leave a 0-byte/garbage file behind — it would mask future retries
+            if os.path.exists(cache_path):
+                try:
+                    os.remove(cache_path)
+                except OSError:
+                    pass
+            return "Thumbnail unavailable", 502
+
     from flask import send_from_directory
     response = send_from_directory(CACHE_DIR, f"{video_id}.jpg")
     response.headers['Access-Control-Allow-Origin'] = '*'
