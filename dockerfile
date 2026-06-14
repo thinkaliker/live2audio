@@ -15,5 +15,12 @@ COPY . .
 
 EXPOSE 5000
 
-# Use gunicorn with threads for multi-user concurrency
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--threads", "4", "stream_manager:app"]
+# Use gunicorn with threads for multi-user concurrency.
+# Logging flags are explicit because gunicorn writes NO access log by default and
+# would otherwise swallow worker-timeout/traceback context:
+#   --access-logfile -  every request + status code to stdout
+#   --error-logfile -   worker timeouts, exits, tracebacks to stdout
+#   --capture-output    fold app stdout/stderr (our print()s) into the gunicorn log
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--threads", "4", \
+     "--access-logfile", "-", "--error-logfile", "-", "--capture-output", \
+     "--log-level", "info", "stream_manager:app"]

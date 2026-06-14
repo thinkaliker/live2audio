@@ -225,6 +225,18 @@ def get_available_streams():
         VIDEO_ID_MAP = temp_map
         if streams:
             LAST_GOOD_STREAMS = streams
+        elif LAST_GOOD_STREAMS:
+            # Present file parsed to zero stations — the silent path that wiped the
+            # dashboard. If the #EXTM3U header is also gone the file is corrupt/clobbered,
+            # so keep the cached list; if the header is intact it's a genuinely empty
+            # playlist (user deleted everything) and we let the empty result through.
+            has_header = '#EXTM3U' in content
+            print(f"PARSED ZERO STREAMS: size={os.path.getsize(m3u_path)} has_header={has_header}", flush=True)
+            with LOG_LOCK:
+                ERROR_LOG.append(f"{datetime.now().strftime('%H:%M:%S')} - Parsed 0 stations (header={has_header})")
+            if not has_header:
+                print(f"Returning last good streams ({len(LAST_GOOD_STREAMS)} stations)", flush=True)
+                return LAST_GOOD_STREAMS
     except Exception as e:
         print(f"M3U Parse Error: {e}", flush=True)
         with LOG_LOCK:
