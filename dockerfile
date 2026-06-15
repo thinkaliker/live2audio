@@ -13,6 +13,13 @@ RUN apk add --no-cache ffmpeg curl nodejs \
 # Copy the rest of the application files
 COPY . .
 
+# Run as a non-root user. uid 1000 matches the typical first host user so the
+# bind-mounted youtube.m3u stays writable; chmod the host file if your uid differs.
+RUN addgroup -S app && adduser -S app -G app -u 1000 \
+    && mkdir -p /app/cache \
+    && chown -R app:app /app
+USER app
+
 EXPOSE 5000
 
 # Use gunicorn with threads for multi-user concurrency.

@@ -8,9 +8,17 @@ services:
     ports:
       - "5000:5000"
     restart: unless-stopped
+    # Host networking is required for SSDP/UPnP (DLNA) discovery to reach LAN devices.
+    network_mode: host
+    # Drop all Linux capabilities (none are needed: port 5000 is unprivileged,
+    # SSDP multicast and ffmpeg/yt-dlp/curl require no caps) and forbid privilege
+    # escalation. Does not affect DLNA discovery or casting.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - ./youtube.m3u:/app/youtube.m3u
-    network_mode: host
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:5000/ping" ]
       interval: 30s
@@ -21,6 +29,11 @@ services:
   watchtower:
     image: nickfedor/watchtower:latest
     container_name: watchtower
+    # NOTE: mounting docker.sock grants this container root-equivalent control of
+    # the host. It is required for Watchtower's auto-update. If you don't need
+    # auto-updates, remove this service; otherwise consider a docker-socket-proxy.
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:

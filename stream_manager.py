@@ -4,15 +4,51 @@ import time
 import threading
 import socket
 import html
+import re
+import ipaddress
+from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from collections import deque
-from flask import Flask, Response, request, jsonify, redirect, render_template
+from flask import Flask, Response, request, jsonify, render_template
 try:
     import upnpclient
 except ImportError:
     upnpclient = None
 
 app = Flask(__name__)
+
+# ── Security helpers ──────────────────────────────────────────────────────────
+VIDEO_ID_RE = re.compile(r'^[A-Za-z0-9_-]{11}$')
+
+def valid_video_id(v):
+    """YouTube IDs are exactly 11 chars of [A-Za-z0-9_-]. Reject anything else
+    before it reaches the filesystem (path traversal) or subprocess args."""
+    return bool(v) and bool(VIDEO_ID_RE.match(v))
+
+def sanitize_m3u_field(s):
+    # EXTINF fields are written as `key="value", name`. Strip the characters that
+    # would let a value break out into a new attribute or a forged playlist entry.
+    return (s or '').replace('\r', ' ').replace('\n', ' ').replace('"', "'").strip()
+
+def _host_is_private(host):
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            ip = ipaddress.ip_address(socket.gethostbyname(host))
+        except Exception:
+            return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+def is_safe_dlna_location(loc):
+    """Block SSRF: only permit casting to private/loopback/link-local targets."""
+    loc = (loc or '').strip()
+    if not loc:
+        return False
+    if loc.startswith('http://') or loc.startswith('https://'):
+        host = urlparse(loc).hostname
+        return bool(host) and _host_is_private(host)
+    return _host_is_private(loc.split(':')[0])
 
 # Server metadata
 START_TIME = datetime.now()
@@ -23,6 +59,12 @@ LAST_STREAM = {"name": "None", "time": "Never"}
 VIDEO_ID_MAP = {}  # Map video_id to station name
 ACTIVE_STREAMS = {}  # Map video_id to count of active listeners
 STREAMS_LOCK = threading.Lock()
+
+# Cap concurrent transcodes per client IP — each stream spawns a long-lived ffmpeg,
+# so without a limit an unauthenticated caller can exhaust CPU/process slots.
+MAX_STREAMS_PER_IP = int(os.getenv('MAX_STREAMS_PER_IP', '5'))
+STREAM_IP_COUNTS = {}
+STREAM_IP_LOCK = threading.Lock()
 LAST_GOOD_STREAMS = []  # Cache of last successful parse result
 # Serializes all youtube.m3u reads/writes. Reentrant because write handlers call
 # get_available_streams() while holding it. Single-file bind mount rules out atomic
@@ -92,6 +134,8 @@ STREAM_AVAILABILITY = {}
 AVAILABILITY_LOCK = threading.Lock()
 
 def check_stream_availability(video_id):
+    if not valid_video_id(video_id):
+        return
     youtube_url = build_youtube_url(video_id)
     try:
         result = subprocess.run(
@@ -109,7 +153,7 @@ def check_stream_availability(video_id):
 
 def cache_thumbnail(video_id):
     """Download thumbnail to local cache if it doesn't exist."""
-    if not video_id or video_id == "Unknown":
+    if not valid_video_id(video_id):
         return
 
     cache_path = os.path.join(CACHE_DIR, f"{video_id}.jpg")
@@ -343,12 +387,19 @@ def add_station():
     else:
         vid_id = url # Assume raw ID if no URL format detected
 
-    if not vid_id:
-        return jsonify({"status": "error", "message": "Could not extract YouTube Video ID"}), 400
+    if not valid_video_id(vid_id):
+        return jsonify({"status": "error", "message": "Could not extract a valid YouTube Video ID"}), 400
 
-    # Sanitize and construct stream URL
+    # Sanitize free-text fields so they can't break out of the EXTINF line
+    name = sanitize_m3u_field(name)
+    tvg_id = sanitize_m3u_field(tvg_id)
+    group = sanitize_m3u_field(group)
+    if not name:
+        return jsonify({"status": "error", "message": "Name is required"}), 400
+
+    # Construct stream URL
     stream_url = f"http://localhost:5000/stream.mp3?v={vid_id}"
-    
+
     # Append to M3U
     m3u_path = "youtube.m3u"
     try:
@@ -383,9 +434,17 @@ def edit_station():
     else:
         new_vid_id = new_url
 
+    if not valid_video_id(new_vid_id):
+        return jsonify({"status": "error", "message": "Could not extract a valid YouTube Video ID"}), 400
+
+    # Sanitize free-text fields so they can't break out of the EXTINF line
+    new_name = sanitize_m3u_field(new_name)
+    new_tvg_id = sanitize_m3u_field(new_tvg_id)
+    new_group = sanitize_m3u_field(new_group)
+    if not new_name:
+        return jsonify({"status": "error", "message": "Name is required"}), 400
+
     # Construct new stream URL
-    # Use lowercase localhost to match what's already in the file or just use relative if possible? 
-    # The existing code uses http://localhost:5000/stream.mp3?v=...
     new_stream_url = f"http://localhost:5000/stream.mp3?v={new_vid_id}"
 
     m3u_path = "youtube.m3u"
@@ -484,6 +543,13 @@ def cast_to_dlna():
     if not (udn or manual_location) or not video_id:
         return jsonify({"success": False, "message": "Missing device UDN/IP or video ID"}), 400
 
+    if not valid_video_id(video_id):
+        return jsonify({"success": False, "message": "Invalid video ID"}), 400
+
+    # Block SSRF: a user-supplied manual target must resolve to a private address
+    if manual_location and not is_safe_dlna_location(manual_location):
+        return jsonify({"success": False, "message": "Target must be a private/LAN address"}), 400
+
     # Construct the absolute stream URL
     server_ip = get_server_ip()
     stream_url = f"http://{server_ip}:5000/stream.mp3?v={video_id}"
@@ -547,7 +613,7 @@ def cast_to_dlna():
                         cached_name = d.get('name', 'DLNA Device')
                         break
             
-            if location:
+            if location and is_safe_dlna_location(location):
                 try:
                     target_device = upnpclient.Device(location)
                 except Exception as e:
@@ -638,6 +704,9 @@ def stop_dlna():
     if not (udn or manual_location):
         return jsonify({"success": False, "message": "Missing device UDN/IP"}), 400
 
+    if manual_location and not is_safe_dlna_location(manual_location):
+        return jsonify({"success": False, "message": "Target must be a private/LAN address"}), 400
+
     try:
         target_device = None
         if udn:
@@ -683,7 +752,16 @@ def stream_audio():
     video_id = request.args.get('v')
     if not video_id:
         return "Missing video ID", 400
-    
+    if not valid_video_id(video_id):
+        return "Invalid video ID", 400
+
+    # Per-IP concurrency cap (HEAD probes are cheap and exempt)
+    client_ip = request.remote_addr or 'unknown'
+    if request.method == 'GET':
+        with STREAM_IP_LOCK:
+            if STREAM_IP_COUNTS.get(client_ip, 0) >= MAX_STREAMS_PER_IP:
+                return "Too many concurrent streams", 429
+
     # Update "Recently Played" with name lookup
     station_name = VIDEO_ID_MAP.get(video_id)
     if not station_name:
@@ -708,6 +786,8 @@ def stream_audio():
         with STREAMS_LOCK:
             ACTIVE_STREAMS[video_id] = ACTIVE_STREAMS.get(video_id, 0) + 1
             current_listeners = ACTIVE_STREAMS[video_id]
+        with STREAM_IP_LOCK:
+            STREAM_IP_COUNTS[client_ip] = STREAM_IP_COUNTS.get(client_ip, 0) + 1
         print(f"[{request_id}] Listener IN (Total: {current_listeners})", flush=True)
             
         ffmpeg_process = None 
@@ -753,6 +833,12 @@ def stream_audio():
             with STREAMS_LOCK:
                 ACTIVE_STREAMS[video_id] = max(0, ACTIVE_STREAMS.get(video_id, 0) - 1)
                 current_listeners = ACTIVE_STREAMS[video_id]
+            with STREAM_IP_LOCK:
+                remaining = STREAM_IP_COUNTS.get(client_ip, 1) - 1
+                if remaining > 0:
+                    STREAM_IP_COUNTS[client_ip] = remaining
+                else:
+                    STREAM_IP_COUNTS.pop(client_ip, None)
             print(f"[{request_id}] Listener OUT (Total: {current_listeners})", flush=True)
             if ffmpeg_process: 
                 ffmpeg_process.terminate()
@@ -774,7 +860,6 @@ def stream_audio():
         headers={
             'Cache-Control': 'no-cache',
             'Accept-Ranges': 'none',
-            'Access-Control-Allow-Origin': '*',
             'icy-name': station_name,
             'icy-description': 'Live2Audio YouTube Stream',
             'icy-url': build_youtube_url(video_id),
@@ -787,7 +872,10 @@ def get_thumbnail():
     video_id = request.args.get('v')
     if not video_id:
         return "Missing video ID", 400
-    
+    if not valid_video_id(video_id):
+        # Reject before building a path — stops `v=../../x` from writing outside cache/
+        return "Invalid video ID", 400
+
     # Check cache first
     cache_path = os.path.join(CACHE_DIR, f"{video_id}.jpg")
     if not os.path.exists(cache_path):
@@ -809,9 +897,7 @@ def get_thumbnail():
             return "Thumbnail unavailable", 502
 
     from flask import send_from_directory
-    response = send_from_directory(CACHE_DIR, f"{video_id}.jpg")
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    return response
+    return send_from_directory(CACHE_DIR, f"{video_id}.jpg")
 
 @app.route('/favicon_base.png')
 def get_favicon_base():

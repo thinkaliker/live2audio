@@ -1,5 +1,16 @@
 let currentCastStreamId = null;
 
+// Escape text destined for innerHTML so station/device strings can't inject markup.
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+
 function initTheme() {
     const stored = localStorage.getItem('theme');
     if (stored === 'light' || stored === 'dark') {
@@ -69,19 +80,32 @@ async function loadDevices() {
             list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No DLNA devices found. Try refreshing.</p>';
             return;
         }
-        
-        let html = '';
+
+        list.innerHTML = '';
         devices.forEach(d => {
-            html += `
-            <div class="device-item" onclick="castToDevice('${d.udn}', event)">
-                <div class="device-info">
-                    <span class="device-name">${d.name}</span>
-                    <span class="device-location">${d.location}</span>
-                </div>
-                <span class="cast-icon">📺</span>
-            </div>`;
+            const item = document.createElement('div');
+            item.className = 'device-item';
+
+            const info = document.createElement('div');
+            info.className = 'device-info';
+            const nameEl = document.createElement('span');
+            nameEl.className = 'device-name';
+            nameEl.textContent = d.name || 'DLNA Device';
+            const locEl = document.createElement('span');
+            locEl.className = 'device-location';
+            locEl.textContent = d.location || '';
+            info.appendChild(nameEl);
+            info.appendChild(locEl);
+
+            const icon = document.createElement('span');
+            icon.className = 'cast-icon';
+            icon.textContent = '📺';
+
+            item.appendChild(info);
+            item.appendChild(icon);
+            item.addEventListener('click', (event) => castToDevice(d.udn, event));
+            list.appendChild(item);
         });
-        list.innerHTML = html;
     } catch (e) {
         list.innerHTML = '<p style="color: var(--error); font-style: italic; text-align: center;">Failed to load devices.</p>';
     }
@@ -510,7 +534,7 @@ async function updateDashboard() {
                     groupEl = document.createElement('div');
                     groupEl.className = 'stream-group';
                     groupEl.dataset.group = key;
-                    groupEl.innerHTML = `<div class="group-header">${key}</div><div class="stream-list"></div>`;
+                    groupEl.innerHTML = `<div class="group-header">${escapeHtml(key)}</div><div class="stream-list"></div>`;
                     container.appendChild(groupEl);
                 }
                 const listEl = groupEl.querySelector('.stream-list');
@@ -528,22 +552,28 @@ async function updateDashboard() {
                         item = document.createElement('div');
                         item.className = 'stream-item';
                         item.dataset.streamId = stream.id;
+                        // Build with escaped text; user-controlled values (name/url/
+                        // group/tvg_id) go through closures, never an inline handler string.
                         item.innerHTML = `
-                            <span class="avail-dot avail-${avail}${live ? ' live' : ''}" title="${dotTitle}"></span>
-                            <img src="${stream.logo || ''}" class="stream-logo" alt="Logo" onerror="this.style.background='var(--logo-placeholder)'">
+                            <span class="avail-dot avail-${escapeHtml(avail)}${live ? ' live' : ''}" title="${escapeHtml(dotTitle)}"></span>
+                            <img src="${escapeHtml(stream.logo || '')}" class="stream-logo" alt="Logo" onerror="this.style.background='var(--logo-placeholder)'">
                             <div class="stream-info">
                                 <div class="stream-name-wrapper">
-                                    <span class="station-name-text">${stream.name}</span>
+                                    <span class="station-name-text">${escapeHtml(stream.name)}</span>
                                 </div>
-                                <span class="stream-sub">${subText}</span>
+                                <span class="stream-sub">${escapeHtml(subText)}</span>
                             </div>
                             <div class="stream-actions">
-                                <button title="Play" class="action-link${stream.id === playingId ? ' playing' : ''}" id="play-btn-${stream.id}" onclick="togglePlayer('${stream.id}')">${stream.id === playingId ? '⏹' : '▶'}</button>
-                                <button title="Cast" class="action-link" onclick="openCastModal('${stream.id}', '${stream.name}')">📺</button>
-                                <button title="Edit" class="action-link" onclick="openEditModal('${stream.id}', '${stream.name}', '${stream.url}', '${stream.group}', '${stream.tvg_id}')">✎</button>
-                                <a title="YouTube" href="https://www.youtube.com/watch?v=${stream.id}" class="action-link" target="_blank">↗</a>
+                                <button title="Play" class="action-link play-btn${stream.id === playingId ? ' playing' : ''}" id="play-btn-${escapeHtml(stream.id)}">${stream.id === playingId ? '⏹' : '▶'}</button>
+                                <button title="Cast" class="action-link cast-btn">📺</button>
+                                <button title="Edit" class="action-link edit-btn">✎</button>
+                                <a title="YouTube" href="https://www.youtube.com/watch?v=${encodeURIComponent(stream.id)}" class="action-link" target="_blank">↗</a>
                             </div>`;
                         listEl.appendChild(item);
+
+                        item.querySelector('.play-btn').addEventListener('click', () => togglePlayer(stream.id));
+                        item.querySelector('.cast-btn').addEventListener('click', () => openCastModal(stream.id, stream.name));
+                        item.querySelector('.edit-btn').addEventListener('click', () => openEditModal(stream.id, stream.name, stream.url, stream.group, stream.tvg_id));
 
                         // Measure marquee after insert, play once then rely on hover
                         const nameEl = item.querySelector('.station-name-text');
@@ -615,7 +645,7 @@ async function updateDashboard() {
             let errorHtml = '';
             // data.errors is deque(maxlen=10), so it's a list
             data.errors.forEach(err => {
-                errorHtml += `<div>${err}</div>`;
+                errorHtml += `<div>${escapeHtml(err)}</div>`;
             });
             errorContainer.innerHTML = errorHtml;
             errorBtn.style.display = 'flex';
@@ -741,14 +771,14 @@ function renderReorderList() {
     reorderData.forEach((stream, idx) => {
         const group = stream.tvg_id || 'Other';
         if (group !== prevGroup) {
-            html += `<div class="reorder-group-label">${group}</div>`;
+            html += `<div class="reorder-group-label">${escapeHtml(group)}</div>`;
             prevGroup = group;
         }
         html += `
         <div class="reorder-item" draggable="true" data-idx="${idx}">
             <span class="drag-handle">⠿</span>
-            <img class="reorder-thumb" src="${stream.logo || ''}" alt="" onerror="this.style.background='var(--logo-placeholder)'">
-            <span class="reorder-name">${stream.name}</span>
+            <img class="reorder-thumb" src="${escapeHtml(stream.logo || '')}" alt="" onerror="this.style.background='var(--logo-placeholder)'">
+            <span class="reorder-name">${escapeHtml(stream.name)}</span>
         </div>`;
     });
     list.innerHTML = html;
