@@ -5,17 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Live2Audio Dashboard</title>
     <link rel="icon" id="dynamic-favicon" href="/favicon_base.png">
+    <!-- Basecoat 1.0.2 (basecoatui.com, MIT), vendored from basecoat-css/dist/basecoat.cdn.min.css -->
+    <link rel="stylesheet" href="/static/vendor/basecoat.cdn.min.css">
     <link rel="stylesheet" href="/static/stylesheet.css">
-    <script>(function(){var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}());</script>
+    <script>(function(){var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&!matchMedia('(prefers-color-scheme: light)').matches);document.documentElement.classList.toggle('dark',d);}());</script>
 </head>
 <body>
     <div class="container">
-        <header>
+        <header class="app-header">
             <div class="header-left">
                 <h1>Live2Audio</h1>
-                <span class="badge badge-success" id="system-status-badge">● ONLINE</span>
+                <span class="badge status-badge" data-variant="success" id="system-status-badge">● ONLINE</span>
             </div>
-            
+
             <div class="header-center">
                 <div class="mini-stat">
                     <span class="mini-stat-value" id="uptime-val">{{ uptime }}</span>
@@ -28,11 +30,11 @@
             </div>
 
             <div class="header-right">
-                <button class="refresh-btn error-btn" onclick="openErrorModal()" id="errorBtn" style="display: none;">⚠ Errors</button>
-                <button class="refresh-btn" id="themeBtn" onclick="cycleTheme()">Auto</button>
-                <button class="refresh-btn" onclick="openReorderModal()" id="reorderBtn">↕ Order</button>
-                <button class="refresh-btn" onclick="refreshM3U()" id="refreshBtn">↻ Refresh</button>
-                <button class="refresh-btn add-btn" onclick="openModal()">+ Add Station</button>
+                <button class="btn" data-variant="destructive" data-size="sm" onclick="openErrorModal()" id="errorBtn" hidden>⚠ Errors</button>
+                <button class="btn" data-variant="outline" data-size="sm" id="themeBtn" onclick="cycleTheme()">Auto</button>
+                <button class="btn" data-variant="outline" data-size="sm" onclick="openReorderModal()" id="reorderBtn">↕ Order</button>
+                <button class="btn" data-variant="outline" data-size="sm" onclick="refreshM3U()" id="refreshBtn">↻ Refresh</button>
+                <button class="btn" data-size="sm" onclick="openModal()">+ Add Station</button>
             </div>
         </header>
 
@@ -53,110 +55,124 @@
                     <span id="playback-status" class="playback-status">Currently Playing</span>
                 </div>
             </div>
-            <button class="stop-btn" onclick="stopAllAudio()">Stop</button>
+            <button class="btn stop-btn" data-variant="destructive" data-size="xs" onclick="stopAllAudio()">Stop</button>
         </div>
         <div class="volume-container">
-            <button id="mute-btn" class="volume-icon" style="background:none; border:none; cursor:pointer; padding:0; display:flex; align-items:center;" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
-            <input type="range" class="volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5">
+            <button id="mute-btn" class="btn volume-icon" data-variant="ghost" data-size="icon-xs" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
+            <input type="range" class="input volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5" aria-label="Volume">
         </div>
     </div>
 
-    <!-- Station Modal -->
-    <div class="modal-overlay" id="modalOverlay">
-        <div class="modal">
-            <h3 id="modalTitle">Add New Station</h3>
-            <input type="hidden" id="oldStationUrl">
-            <div class="form-group">
-                <label>YouTube URL or Video ID</label>
-                <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=...">
-            </div>
-            <div class="form-group">
-                <label>Station Name</label>
-                <input type="text" id="stationName" placeholder="Lofi Radio">
-            </div>
-            <div class="form-group">
-                <label>Station ID (Optional)</label>
-                <input type="text" id="stationId" placeholder="LofiGirl">
-            </div>
-            <div class="form-group">
-                <label>Group (Optional)</label>
-                <input type="text" id="stationGroup" placeholder="YouTube Radio">
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-danger" id="deleteBtn" onclick="openDeleteConfirmModal()" style="display: none; margin-right: auto;">Delete</button>
-                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="handleStationSubmit()" id="submitBtn">Save Station</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Delete Confirm Modal -->
-    <div class="modal-overlay" id="deleteConfirmOverlay">
-        <div class="modal" style="max-width: 380px;">
-            <h3 style="color: var(--error); margin-top: 0;">Delete Station</h3>
-            <p id="deleteConfirmText" style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 24px;"></p>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeDeleteConfirmModal()">Cancel</button>
-                <button class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDeleteStation()">Delete</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Error Modal -->
-    <div class="modal-overlay" id="errorModalOverlay">
-        <div class="modal">
-            <h3 style="color: var(--error);">Session Error Log</h3>
-            <div id="error-log-container-modal" class="error-list-modal">
-                <!-- Errors will be populated here -->
-            </div>
-            <div class="modal-actions" style="margin-top: 20px;">
-                <button class="btn btn-secondary" onclick="closeErrorModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Cast Modal -->
-    <div class="modal-overlay" id="castModalOverlay">
-        <div class="modal">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 id="castModalTitle" style="margin: 0;">Cast to Device</h3>
-                <button class="refresh-btn" onclick="refreshDevices()" id="refreshDevicesBtn">↻ Refresh</button>
-            </div>
-            <p id="castStationName" style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 15px;"></p>
-            
-            <div class="form-group" style="margin-bottom: 15px;">
-                <label>Manual Device entry (IP or Location URL)</label>
-                <div style="display: flex; gap: 8px;">
-                    <input type="text" id="manualDeviceIp" placeholder="192.168.1.100" style="flex: 1;">
-                    <button class="btn btn-primary" onclick="castToManualIp()" style="padding: 8px 12px; font-size: 0.8rem;">Cast to IP</button>
+    <!-- Station Dialog -->
+    <dialog class="dialog" id="stationDialog" aria-labelledby="modalTitle">
+        <div>
+            <header>
+                <h2 id="modalTitle">Add New Station</h2>
+            </header>
+            <section class="fields">
+                <input type="hidden" id="oldStationUrl">
+                <div class="field">
+                    <label for="stationUrl">YouTube URL or Video ID</label>
+                    <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=...">
                 </div>
-            </div>
-
-            <div id="device-list" class="device-list">
-                <!-- Devices will be populated here -->
-                <p style="color: var(--text-dim); font-style: italic; text-align: center;">Searching for devices...</p>
-            </div>
-            <div class="modal-actions" style="margin-top: 25px;">
-                <button class="btn btn-secondary" onclick="closeCastModal()">Cancel</button>
-            </div>
+                <div class="field">
+                    <label for="stationName">Station Name</label>
+                    <input type="text" id="stationName" placeholder="Lofi Radio">
+                </div>
+                <div class="field">
+                    <label for="stationId">Station ID (Optional)</label>
+                    <input type="text" id="stationId" placeholder="LofiGirl">
+                </div>
+                <div class="field">
+                    <label for="stationGroup">Group (Optional)</label>
+                    <input type="text" id="stationGroup" placeholder="YouTube Radio">
+                </div>
+            </section>
+            <footer>
+                <button class="btn" data-variant="destructive" id="deleteBtn" onclick="openDeleteConfirmModal()" hidden>Delete</button>
+                <button class="btn" data-variant="secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn" onclick="handleStationSubmit()" id="submitBtn">Save Station</button>
+            </footer>
         </div>
-    </div>
+    </dialog>
 
-    <!-- Reorder Modal -->
-    <div class="modal-overlay" id="reorderModalOverlay">
-        <div class="modal reorder-modal">
-            <div class="reorder-modal-header">
-                <h3 style="margin: 0;">Reorder Stations</h3>
-                <button class="btn btn-secondary" onclick="closeReorderModal()" style="padding: 6px 12px; font-size: 0.8rem;">✕</button>
-            </div>
-            <p style="font-size: 0.75rem; color: var(--text-dim); margin: 8px 0 12px;">Drag to reorder. Blank lines separate groups in the saved file.</p>
+    <!-- Delete Confirm Dialog -->
+    <dialog class="dialog" id="deleteConfirmDialog" role="alertdialog" aria-labelledby="deleteConfirmTitle" aria-describedby="deleteConfirmText">
+        <div class="dialog-narrow">
+            <header>
+                <h2 id="deleteConfirmTitle" class="danger">Delete Station</h2>
+            </header>
+            <section>
+                <p id="deleteConfirmText" class="dialog-subtitle"></p>
+            </section>
+            <footer>
+                <button class="btn" data-variant="secondary" onclick="closeDeleteConfirmModal()">Cancel</button>
+                <button class="btn" data-variant="destructive" id="confirmDeleteBtn" onclick="confirmDeleteStation()">Delete</button>
+            </footer>
+        </div>
+    </dialog>
+
+    <!-- Error Dialog -->
+    <dialog class="dialog" id="errorDialog" aria-labelledby="errorDialogTitle">
+        <div>
+            <header>
+                <h2 id="errorDialogTitle" class="danger">Session Error Log</h2>
+            </header>
+            <section id="error-log-container-modal" class="error-list">
+                <!-- Errors will be populated here -->
+            </section>
+            <footer>
+                <button class="btn" data-variant="secondary" onclick="closeErrorModal()">Close</button>
+            </footer>
+        </div>
+    </dialog>
+
+    <!-- Cast Dialog -->
+    <dialog class="dialog" id="castDialog" aria-labelledby="castModalTitle">
+        <div>
+            <header>
+                <div class="dialog-title-row">
+                    <h2 id="castModalTitle">Cast to Device</h2>
+                    <button class="btn" data-variant="outline" data-size="sm" onclick="refreshDevices()" id="refreshDevicesBtn">↻ Refresh</button>
+                </div>
+            </header>
+            <section class="fields">
+                <p id="castStationName" class="dialog-subtitle"></p>
+                <div class="field">
+                    <label for="manualDeviceIp">Manual Device entry (IP or Location URL)</label>
+                    <div class="inline-row">
+                        <input type="text" class="input" id="manualDeviceIp" placeholder="192.168.1.100">
+                        <button class="btn" data-size="sm" onclick="castToManualIp()">Cast to IP</button>
+                    </div>
+                </div>
+                <div id="device-list" class="device-list">
+                    <!-- Devices will be populated here -->
+                    <p class="note">Searching for devices...</p>
+                </div>
+            </section>
+            <footer>
+                <button class="btn" data-variant="secondary" onclick="closeCastModal()">Cancel</button>
+            </footer>
+        </div>
+    </dialog>
+
+    <!-- Reorder Dialog -->
+    <dialog class="dialog" id="reorderDialog" aria-labelledby="reorderTitle">
+        <div class="reorder-modal">
+            <header>
+                <div class="dialog-title-row">
+                    <h2 id="reorderTitle">Reorder Stations</h2>
+                    <button class="btn" data-variant="secondary" data-size="sm" onclick="closeReorderModal()" aria-label="Close">✕</button>
+                </div>
+                <p class="dialog-hint">Drag to reorder. Blank lines separate groups in the saved file.</p>
+            </header>
             <div id="reorder-list" class="reorder-list"></div>
-            <div class="modal-actions" style="margin-top: 16px;">
-                <button class="btn btn-secondary" onclick="closeReorderModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveOrder()" id="saveOrderBtn">Save Order</button>
-            </div>
+            <footer>
+                <button class="btn" data-variant="secondary" onclick="closeReorderModal()">Cancel</button>
+                <button class="btn" onclick="saveOrder()" id="saveOrderBtn">Save Order</button>
+            </footer>
         </div>
-    </div>
+    </dialog>
 
     <script>const SERVER_ID = '{{ server_id }}';</script>
     <script src="/static/script.js"></script>

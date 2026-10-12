@@ -50,6 +50,10 @@ def is_safe_dlna_location(loc):
         return bool(host) and _host_is_private(host)
     return _host_is_private(loc.split(':')[0])
 
+# yt-dlp needs a JS runtime to solve YouTube's challenges but only enables deno by
+# default. The Docker image ships node, so enable it too (this adds, deno still works).
+YTDLP_CMD = ['yt-dlp', '--js-runtimes', 'node']
+
 # Server metadata
 START_TIME = datetime.now()
 SERVER_ID = str(int(START_TIME.timestamp()))  # Unique ID for this server instance
@@ -139,7 +143,7 @@ def check_stream_availability(video_id):
     youtube_url = build_youtube_url(video_id)
     try:
         result = subprocess.run(
-            ['yt-dlp', '-g', '-f', 'ba/b', '--no-playlist', youtube_url],
+            [*YTDLP_CMD, '-g', '-f', 'ba/b', '--no-playlist', youtube_url],
             capture_output=True, text=True, timeout=30
         )
         status = "available" if result.returncode == 0 else "unavailable"
@@ -794,7 +798,7 @@ def stream_audio():
         try:
             # 1. Get the direct audio URL from YouTube
             print(f"[{request_id}] Fetching YouTube URL...", flush=True)
-            url_command = ['yt-dlp', '-g', '-f', 'ba/b', youtube_url]
+            url_command = [*YTDLP_CMD, '-g', '-f', 'ba/b', youtube_url]
             url_proc = subprocess.run(url_command, capture_output=True, text=True)
             
             if url_proc.returncode != 0:

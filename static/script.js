@@ -11,14 +11,22 @@ function escapeHtml(s) {
 }
 
 
+// Basecoat's dark styles key off html.dark, so 'auto' is resolved here rather than in CSS.
+// Dark unless the OS asks for light, matching the original stylesheet's default.
+const lightSchemeQuery = window.matchMedia('(prefers-color-scheme: light)');
+
+function applyTheme(mode) {
+    const dark = mode === 'dark' || (mode === 'auto' && !lightSchemeQuery.matches);
+    document.documentElement.classList.toggle('dark', dark);
+}
+
 function initTheme() {
     const stored = localStorage.getItem('theme');
-    if (stored === 'light' || stored === 'dark') {
-        document.documentElement.dataset.theme = stored;
-    } else {
-        delete document.documentElement.dataset.theme;
-    }
-    updateThemeBtn(stored || 'auto');
+    const mode = stored === 'light' || stored === 'dark' ? stored : 'auto';
+    applyTheme(mode);
+    updateThemeBtn(mode);
+    // Keep following the OS while in auto mode
+    lightSchemeQuery.addEventListener('change', () => applyTheme(localStorage.getItem('theme') || 'auto'));
 }
 
 function updateThemeBtn(mode) {
@@ -32,7 +40,7 @@ function updatePlayBtns(activeId) {
         const isActive = activeId != null && btn.id === `play-btn-${activeId}`;
         btn.innerText = isActive ? '⏹' : '▶';
         btn.title = isActive ? 'Stop' : 'Play';
-        btn.classList.toggle('playing', isActive);
+        btn.dataset.variant = isActive ? 'destructive' : 'outline';
     });
 }
 
@@ -41,11 +49,10 @@ function cycleTheme() {
     const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
     if (next === 'auto') {
         localStorage.removeItem('theme');
-        delete document.documentElement.dataset.theme;
     } else {
         localStorage.setItem('theme', next);
-        document.documentElement.dataset.theme = next;
     }
+    applyTheme(next);
     updateThemeBtn(next);
 }
 
@@ -61,13 +68,13 @@ function safeSetText(id, text) {
 function openCastModal(streamId, stationName) {
     currentCastStreamId = streamId;
     safeSetText('castStationName', "Target Station: " + stationName);
-    document.getElementById('castModalOverlay').style.display = 'flex';
+    document.getElementById('castDialog').showModal();
     loadDevices();
 }
 
+// currentCastStreamId is cleared by the dialog's 'close' listener, so Esc resets it too
 function closeCastModal() {
-    document.getElementById('castModalOverlay').style.display = 'none';
-    currentCastStreamId = null;
+    document.getElementById('castDialog').close();
 }
 
 async function loadDevices() {
@@ -77,7 +84,7 @@ async function loadDevices() {
         const devices = await response.json();
         
         if (devices.length === 0) {
-            list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No DLNA devices found. Try refreshing.</p>';
+            list.innerHTML = '<p class="note">No DLNA devices found. Try refreshing.</p>';
             return;
         }
 
@@ -107,7 +114,7 @@ async function loadDevices() {
             list.appendChild(item);
         });
     } catch (e) {
-        list.innerHTML = '<p style="color: var(--error); font-style: italic; text-align: center;">Failed to load devices.</p>';
+        list.innerHTML = '<p class="note note-error">Failed to load devices.</p>';
     }
 }
 
@@ -118,19 +125,19 @@ async function refreshDevices() {
     
     btn.innerText = '⌛ Scanning...';
     btn.disabled = true;
-    list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">Scanning for devices...</p>';
+    list.innerHTML = '<p class="note">Scanning for devices...</p>';
     
     try {
         const response = await fetch('/api/dlna/refresh', { method: 'POST' });
         const devices = await response.json();
         
         if (devices.length === 0) {
-            list.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No DLNA devices found.</p>';
+            list.innerHTML = '<p class="note">No DLNA devices found.</p>';
         } else {
             loadDevices();
         }
     } catch (e) {
-        list.innerHTML = '<p style="color: var(--error); font-style: italic; text-align: center;">Scan failed.</p>';
+        list.innerHTML = '<p class="note note-error">Scan failed.</p>';
     } finally {
         btn.innerText = originalText;
         btn.disabled = false;
@@ -357,12 +364,23 @@ document.addEventListener('DOMContentLoaded', () => {
     
     sessionStorage.setItem('server_id', currentServerId);
     restoreUIState();
+
+    // Reset per-dialog state however a dialog closes (buttons or Esc)
+    document.getElementById('castDialog').addEventListener('close', () => {
+        currentCastStreamId = null;
+    });
+    document.getElementById('reorderDialog').addEventListener('close', () => {
+        reorderData = [];
+        dragSrcIdx = null;
+    });
+
     const volControl = document.getElementById('volume-control');
     volControl.addEventListener('input', (e) => {
         const vol = e.target.value;
         document.getElementById('main-audio').volume = vol;
         localStorage.setItem('userVolume', vol);
-        
+        syncVolumeFill(volControl);
+
         const muteBtn = document.getElementById('mute-btn');
         if (muteBtn) {
             muteBtn.innerText = vol == 0 ? '🔇' : '🔊';
@@ -374,7 +392,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (savedVol !== null) {
         volControl.value = savedVol;
     }
-    
+    syncVolumeFill(volControl);
+
     window.toggleMute = function() {
         const audio = document.getElementById('main-audio');
         const volControl = document.getElementById('volume-control');
@@ -393,6 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
             volControl.value = prevVol;
             if (muteBtn) muteBtn.innerText = '🔊';
         }
+        syncVolumeFill(volControl);
         localStorage.setItem('userVolume', audio.volume);
     };
 
@@ -405,6 +425,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial dashboard update
     updateDashboard();
 });
+
+// Basecoat's slider fills the track up to --slider-value
+function syncVolumeFill(input) {
+    const pct = (input.value - input.min) / (input.max - input.min) * 100;
+    input.style.setProperty('--slider-value', `${pct}%`);
+}
+
 function openModal() {
     document.getElementById('modalTitle').innerText = "Add New Station";
     document.getElementById('oldStationUrl').value = "";
@@ -412,8 +439,8 @@ function openModal() {
     document.getElementById('stationName').value = "";
     document.getElementById('stationId').value = "";
     document.getElementById('stationGroup').value = "";
-    document.getElementById('deleteBtn').style.display = 'none';
-    document.getElementById('modalOverlay').style.display = 'flex';
+    document.getElementById('deleteBtn').hidden = true;
+    document.getElementById('stationDialog').showModal();
 }
 
 function openEditModal(id, name, url, group, tvg_id) {
@@ -423,18 +450,18 @@ function openEditModal(id, name, url, group, tvg_id) {
     document.getElementById('stationName').value = name;
     document.getElementById('stationId').value = tvg_id;
     document.getElementById('stationGroup').value = group;
-    document.getElementById('deleteBtn').style.display = 'inline-flex';
-    document.getElementById('modalOverlay').style.display = 'flex';
+    document.getElementById('deleteBtn').hidden = false;
+    document.getElementById('stationDialog').showModal();
 }
 
 function openDeleteConfirmModal() {
     const name = document.getElementById('stationName').value;
     document.getElementById('deleteConfirmText').innerText = `Delete "${name}"? This will remove it from the M3U file and cannot be undone.`;
-    document.getElementById('deleteConfirmOverlay').style.display = 'flex';
+    document.getElementById('deleteConfirmDialog').showModal();
 }
 
 function closeDeleteConfirmModal() {
-    document.getElementById('deleteConfirmOverlay').style.display = 'none';
+    document.getElementById('deleteConfirmDialog').close();
 }
 
 async function confirmDeleteStation() {
@@ -466,15 +493,15 @@ async function confirmDeleteStation() {
 }
 
 function closeModal() {
-    document.getElementById('modalOverlay').style.display = 'none';
+    document.getElementById('stationDialog').close();
 }
 
 function openErrorModal() {
-    document.getElementById('errorModalOverlay').style.display = 'flex';
+    document.getElementById('errorDialog').showModal();
 }
 
 function closeErrorModal() {
-    document.getElementById('errorModalOverlay').style.display = 'none';
+    document.getElementById('errorDialog').close();
 }
 
 async function updateDashboard() {
@@ -486,7 +513,7 @@ async function updateDashboard() {
         
         safeSetText('system-status-badge', '● ONLINE');
         const badge = document.getElementById('system-status-badge');
-        if (badge) badge.className = 'badge badge-success';
+        if (badge) badge.dataset.variant = 'success';
         
         // Update dynamic favicon badge
         updateFaviconBadge(data.live_count);
@@ -564,10 +591,10 @@ async function updateDashboard() {
                                 <span class="stream-sub">${escapeHtml(subText)}</span>
                             </div>
                             <div class="stream-actions">
-                                <button title="Play" class="action-link play-btn${stream.id === playingId ? ' playing' : ''}" id="play-btn-${escapeHtml(stream.id)}">${stream.id === playingId ? '⏹' : '▶'}</button>
-                                <button title="Cast" class="action-link cast-btn">📺</button>
-                                <button title="Edit" class="action-link edit-btn">✎</button>
-                                <a title="YouTube" href="https://www.youtube.com/watch?v=${encodeURIComponent(stream.id)}" class="action-link" target="_blank">↗</a>
+                                <button title="Play" class="btn play-btn" data-variant="${stream.id === playingId ? 'destructive' : 'outline'}" data-size="xs" id="play-btn-${escapeHtml(stream.id)}">${stream.id === playingId ? '⏹' : '▶'}</button>
+                                <button title="Cast" class="btn cast-btn" data-variant="outline" data-size="xs">📺</button>
+                                <button title="Edit" class="btn edit-btn" data-variant="outline" data-size="xs">✎</button>
+                                <a title="YouTube" href="https://www.youtube.com/watch?v=${encodeURIComponent(stream.id)}" class="btn" data-variant="outline" data-size="xs" target="_blank">↗</a>
                             </div>`;
                         listEl.appendChild(item);
 
@@ -598,7 +625,7 @@ async function updateDashboard() {
                         const wantedLabel = isActive ? '⏹' : '▶';
                         if (playBtn) {
                             if (playBtn.innerText !== wantedLabel) playBtn.innerText = wantedLabel;
-                            playBtn.classList.toggle('playing', isActive);
+                            playBtn.dataset.variant = isActive ? 'destructive' : 'outline';
                         }
 
                         // Move into correct group list if it changed groups
@@ -635,7 +662,7 @@ async function updateDashboard() {
         } else if (!container.querySelector('.stream-group')) {
             // Only show "no stations" if we've never populated — empty response when list
             // already exists is a transient server-side failure, don't wipe the display
-            container.innerHTML = '<p style="color: var(--text-dim); font-style: italic;">No stations found in youtube.m3u.</p>';
+            container.innerHTML = '<p class="note">No stations found in youtube.m3u.</p>';
         }
 
         // Update errors
@@ -648,15 +675,15 @@ async function updateDashboard() {
                 errorHtml += `<div>${escapeHtml(err)}</div>`;
             });
             errorContainer.innerHTML = errorHtml;
-            errorBtn.style.display = 'flex';
+            errorBtn.hidden = false;
         } else {
-            errorContainer.innerHTML = '<p style="color: var(--text-dim); font-style: italic; text-align: center;">No errors reported in this session.</p>';
-            errorBtn.style.display = 'none';
+            errorContainer.innerHTML = '<p class="note">No errors reported in this session.</p>';
+            errorBtn.hidden = true;
         }
     } catch (e) {
         console.error("Dashboard update failed", e);
         badge.innerText = '● SYSTEM OFFLINE';
-        badge.className = 'badge badge-error';
+        badge.dataset.variant = 'destructive';
     }
 }
 
@@ -740,7 +767,7 @@ let reorderData = [];   // flat array of stream objects in current order
 let dragSrcIdx = null;
 
 function openReorderModal() {
-    document.getElementById('reorderModalOverlay').style.display = 'flex';
+    document.getElementById('reorderDialog').showModal();
     fetch('/api/stats')
         .then(r => r.json())
         .then(data => {
@@ -749,20 +776,19 @@ function openReorderModal() {
         })
         .catch(() => {
             document.getElementById('reorder-list').innerHTML =
-                '<p style="color:#ef4444;text-align:center;">Failed to load stations.</p>';
+                '<p class="note note-error">Failed to load stations.</p>';
         });
 }
 
+// reorderData/dragSrcIdx are reset by the dialog's 'close' listener, so Esc resets them too
 function closeReorderModal() {
-    document.getElementById('reorderModalOverlay').style.display = 'none';
-    reorderData = [];
-    dragSrcIdx = null;
+    document.getElementById('reorderDialog').close();
 }
 
 function renderReorderList() {
     const list = document.getElementById('reorder-list');
     if (!reorderData.length) {
-        list.innerHTML = '<p style="color:var(--text-dim);text-align:center;font-style:italic;">No stations.</p>';
+        list.innerHTML = '<p class="note">No stations.</p>';
         return;
     }
 

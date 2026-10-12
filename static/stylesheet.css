@@ -1,93 +1,87 @@
+/* Live2Audio theme on top of Basecoat (static/vendor/basecoat.cdn.min.css).
+   Basecoat components read shadcn-style tokens; they are mapped here to the
+   Live2Audio palette. Light is the base and html.dark (set by the theme script in
+   index.html / script.js) switches to dark. Every token is repeated in .dark because
+   Basecoat's own .dark block has the same specificity as :root. */
 :root {
-    --primary: #6366f1;
-    --primary-hover: #818cf8;
-    --bg: #111111;
-    --card: #1e1e1e;
-    --text: #f0f0f0;
-    --border: rgba(255, 255, 255, 0.09);
-    --text-muted: #a0a0a0;
-    --text-dim: #666;
-    --error: #ef4444;
-    --error-light: #fca5a5;
-    --success: #22c55e;
-    --success-light: #4ade80;
-    --surface: rgba(255, 255, 255, 0.03);
-    --surface-raised: rgba(255, 255, 255, 0.05);
-    --surface-hover: rgba(255, 255, 255, 0.08);
-    --thumb-bg: #3a3a3a;
-    --overlay: rgba(0, 0, 0, 0.8);
-    --overlay-inner: rgba(0, 0, 0, 0.2);
-    --card-glass: rgba(30, 30, 30, 0.88);
-    --surface-active: rgba(255, 255, 255, 0.12);
-    --error-bg-subtle: rgba(239, 68, 68, 0.05);
-    --error-bg: rgba(239, 68, 68, 0.1);
-    --error-bg-hover: rgba(239, 68, 68, 0.2);
-    --error-bg-strong: rgba(239, 68, 68, 0.3);
-    --success-bg: rgba(34, 197, 94, 0.2);
-    --success-glow: rgba(34, 197, 94, 0.4);
-    --logo-placeholder: #2d3748;
-}
-
-[data-theme="light"] {
-    --primary: #4f46e5;
-    --primary-hover: #6366f1;
-    --bg: #f3f4f6;
+    color-scheme: light;
+    --radius: 0.625rem;
+    --background: #f3f4f6;
+    --foreground: #111827;
     --card: #ffffff;
-    --text: #111827;
-    --error-light: #ffe8e8;
+    --card-foreground: #111827;
+    --popover: #ffffff;
+    --popover-foreground: #111827;
+    --primary: #4f46e5;
+    --primary-foreground: #ffffff;
+    --secondary: rgba(0, 0, 0, 0.05);
+    --secondary-foreground: #6b7280;
+    --muted: rgba(0, 0, 0, 0.07);
+    --muted-foreground: #6b7280;
+    --accent: rgba(0, 0, 0, 0.11);
+    --accent-foreground: #111827;
+    --destructive: #ef4444;
     --border: rgba(0, 0, 0, 0.09);
-    --text-muted: #6b7280;
+    --input: rgba(0, 0, 0, 0.09);
+    --ring: #6366f1;
+
+    /* App tokens with no Basecoat equivalent */
     --text-dim: #9ca3af;
     --surface: rgba(0, 0, 0, 0.03);
-    --surface-raised: rgba(0, 0, 0, 0.05);
-    --surface-hover: rgba(0, 0, 0, 0.07);
+    --inset: rgba(0, 0, 0, 0.08);
+    --glass: rgba(255, 255, 255, 0.92);
     --thumb-bg: #d1d5db;
-    --overlay: rgba(0, 0, 0, 0.5);
-    --overlay-inner: rgba(0, 0, 0, 0.08);
-    --card-glass: rgba(255, 255, 255, 0.92);
-    --surface-active: rgba(0, 0, 0, 0.11);
-    --error-bg-subtle: rgba(239, 68, 68, 0.04);
-    --error-bg: rgba(239, 68, 68, 0.08);
-    --error-bg-hover: rgba(239, 68, 68, 0.9);
-    --error-bg-strong: rgba(239, 68, 68, 1.0);
+    --logo-placeholder: #cbd5e1;
+    --success: #22c55e;
+    --success-light: #4ade80;
     --success-bg: rgba(34, 197, 94, 0.15);
     --success-glow: rgba(34, 197, 94, 0.3);
-    --logo-placeholder: #cbd5e1;
+    --error-light: #ffe8e8;
+    --error-bg: rgba(239, 68, 68, 0.08);
+    --error-bg-hover: rgba(239, 68, 68, 0.9);
 }
 
-@media (prefers-color-scheme: light) {
-    :root:not([data-theme]) {
-        --primary: #4f46e5;
-        --primary-hover: #6366f1;
-        --bg: #f3f4f6;
-        --card: #ffffff;
-        --text: #111827;
-        --error-light: #ffe8e8;
-        --border: rgba(0, 0, 0, 0.09);
-        --text-muted: #6b7280;
-        --text-dim: #9ca3af;
-        --surface: rgba(0, 0, 0, 0.03);
-        --surface-raised: rgba(0, 0, 0, 0.05);
-        --surface-hover: rgba(0, 0, 0, 0.07);
-        --thumb-bg: #d1d5db;
-        --overlay: rgba(0, 0, 0, 0.5);
-        --overlay-inner: rgba(0, 0, 0, 0.08);
-        --card-glass: rgba(255, 255, 255, 0.92);
-        --surface-active: rgba(0, 0, 0, 0.11);
-        --error-bg-subtle: rgba(239, 68, 68, 0.04);
-        --error-bg: rgba(239, 68, 68, 0.08);
-        --error-bg-hover: rgba(239, 68, 68, 0.9);
-        --error-bg-strong: rgba(239, 68, 68, 1.0);
-        --success-bg: rgba(34, 197, 94, 0.15);
-        --success-glow: rgba(34, 197, 94, 0.3);
-        --logo-placeholder: #cbd5e1;
-    }
+.dark {
+    color-scheme: dark;
+    --background: #111111;
+    --foreground: #f0f0f0;
+    --card: #1e1e1e;
+    --card-foreground: #f0f0f0;
+    --popover: #1e1e1e;
+    --popover-foreground: #f0f0f0;
+    --primary: #6366f1;
+    --primary-foreground: #ffffff;
+    --secondary: rgba(255, 255, 255, 0.05);
+    --secondary-foreground: #a0a0a0;
+    --muted: rgba(255, 255, 255, 0.08);
+    --muted-foreground: #a0a0a0;
+    --accent: rgba(255, 255, 255, 0.12);
+    --accent-foreground: #f0f0f0;
+    --destructive: #ef4444;
+    --border: rgba(255, 255, 255, 0.09);
+    --input: rgba(255, 255, 255, 0.09);
+    --ring: #818cf8;
+
+    --text-dim: #666;
+    --surface: rgba(255, 255, 255, 0.03);
+    --inset: rgba(0, 0, 0, 0.2);
+    --glass: rgba(30, 30, 30, 0.88);
+    --thumb-bg: #3a3a3a;
+    --logo-placeholder: #2d3748;
+    --success: #22c55e;
+    --success-light: #4ade80;
+    --success-bg: rgba(34, 197, 94, 0.2);
+    --success-glow: rgba(34, 197, 94, 0.4);
+    --error-light: #fca5a5;
+    --error-bg: rgba(239, 68, 68, 0.1);
+    --error-bg-hover: rgba(239, 68, 68, 0.2);
 }
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-    background: var(--bg);
-    color: var(--text);
-    margin: 0;
+    line-height: normal; /* Basecoat's preflight uses 1.5; keep the original metrics */
+    background: var(--background);
+    color: var(--foreground);
     min-height: 100vh;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
@@ -97,9 +91,8 @@ body {
     background: var(--card);
     padding: 20px;
     padding-top: calc(70px + 20px);
-    box-sizing: border-box;
 }
-header {
+.app-header {
     position: fixed;
     top: 0;
     left: 0;
@@ -111,7 +104,7 @@ header {
     flex-wrap: wrap;
     gap: 12px;
     padding: 12px 20px;
-    background: var(--card-glass);
+    background: var(--glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
@@ -125,7 +118,7 @@ header {
     display: flex;
     align-items: center;
     gap: 20px;
-    background: var(--overlay-inner);
+    background: var(--inset);
     padding: 8px 20px;
     border-radius: 100px;
     border: 1px solid var(--border);
@@ -135,59 +128,10 @@ header {
     align-items: center;
     gap: 10px;
 }
-.refresh-btn {
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    padding: 8px 16px;
-    border-radius: 12px;
-    cursor: pointer;
-    font-size: 0.75rem;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-.refresh-btn:hover {
-    background: var(--surface-hover);
-    color: var(--text);
-}
-.add-btn {
-    background: var(--primary);
-    color: white;
-    border: none;
-}
-.add-btn:hover {
-    filter: brightness(1.2);
-}
-.error-btn {
-    background: var(--error-bg);
-    border: 1px solid var(--error-bg-hover);
-    color: var(--error);
-}
-.error-btn:hover {
-    background: var(--error-bg-hover);
-    color: var(--error-light);
-}
-.error-list-modal {
-    max-height: 300px;
-    overflow-y: auto;
-    background: var(--overlay-inner);
-    border-radius: 12px;
-    padding: 15px;
-    font-family: monospace;
-    font-size: 0.8rem;
-    color: var(--error);
-    margin-top: 15px;
-}
-.error-list-modal div {
-    padding: 4px 0;
-    border-bottom: 1px solid var(--border);
-}
 h1 {
     font-size: 1.5rem;
-    margin: 0;
-    color: var(--text);
+    font-weight: 700;
+    color: var(--foreground);
     white-space: nowrap;
 }
 .mini-stat {
@@ -199,7 +143,7 @@ h1 {
 .mini-stat-value {
     font-size: 0.9rem;
     font-weight: 600;
-    color: var(--text);
+    color: var(--foreground);
 }
 .mini-stat-label {
     font-size: 0.65rem;
@@ -207,92 +151,166 @@ h1 {
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
-/* Modal Styles */
-.modal-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: var(--overlay);
-    backdrop-filter: blur(4px);
-    display: none;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-.modal {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 30px;
-    width: 100%;
-    max-width: 450px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-}
-.modal h3 { margin-top: 0; color: var(--primary); }
-.form-group { margin-bottom: 20px; }
-.form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 5px; }
-.form-group input {
-    width: 100%;
-    background: var(--overlay-inner);
-    border: 1px solid var(--border);
-    padding: 10px;
-    border-radius: 8px;
-    color: var(--text);
-    box-sizing: border-box;
-}
-.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-.btn {
-    padding: 10px 20px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    border: none;
-}
-.btn-primary { background: var(--primary); color: white; }
-.btn-secondary { background: var(--surface-raised); color: var(--text-muted); }
-.btn-danger { background: var(--error-bg); color: var(--error); border: 1px solid var(--error-bg-hover); }
-.btn-danger:hover { background: var(--error-bg-hover); color: var(--error-light); }
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 20px;
-    margin-bottom: 40px;
-}
-.player-container {
-    width: 100%;
-    margin-top: 12px;
-    display: none;
-}
 audio {
     display: none;
 }
-.stat-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 20px;
-    border-radius: 16px;
+.note {
+    color: var(--text-dim);
+    font-style: italic;
     text-align: center;
 }
-.stat-value {
-    font-size: 1.5rem;
+.note-error { color: var(--destructive); }
+#stream-list-container > .note { text-align: start; }
+
+/* ── Basecoat component tuning: keep the original Live2Audio sizes ─────────── */
+/* Controls used the browser's default control font before Basecoat's preflight made
+   them inherit the body stack (whose emoji fallback turns ⏹ into a color emoji). */
+button, input {
+    font-family: revert;
+}
+.btn {
+    font-weight: 400;
+    cursor: pointer;
+}
+.btn:not([data-size]) {
+    padding: 0 20px;
+    font-size: 0.9rem;
+}
+/* Outline is the bordered chip used in the header and on station tiles */
+.btn[data-variant='outline'] {
+    background: var(--secondary);
+    border-color: var(--border);
+    color: var(--muted-foreground);
+}
+.btn[data-variant='outline']:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+.btn[data-variant='destructive'] {
+    background: var(--error-bg);
+    border-color: var(--error-bg-hover);
+    color: var(--destructive);
+}
+.btn[data-variant='destructive']:hover {
+    background: var(--error-bg-hover);
+    color: var(--error-light);
+}
+.app-header .btn,
+#refreshDevicesBtn {
+    height: auto;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    gap: 6px;
+}
+.stream-actions .btn {
+    height: auto;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+}
+.stream-actions .btn[data-variant='outline']:hover {
+    background: var(--accent);
+    border-color: var(--primary);
+}
+.stop-btn {
+    height: auto;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+}
+.stop-btn:hover { color: #fff; }
+
+.status-badge {
+    height: auto;
+    padding: 4px 10px;
+    border: 0;
     font-weight: 600;
+}
+.badge[data-variant='success'] { background: var(--success-bg); color: var(--success-light); }
+.badge[data-variant='destructive'] { background: var(--error-bg-hover); color: var(--error-light); }
+
+.field { gap: 5px; }
+.field > label {
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: normal;
+    color: var(--muted-foreground);
+}
+.field > input[type='text'],
+.input[type='text'] {
+    background: var(--inset);
+}
+.fields {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.inline-row {
+    display: flex;
+    gap: 8px;
+}
+.inline-row .btn {
+    height: auto;
+    padding: 0 12px;
+    font-size: 0.8rem;
+}
+
+.dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); }
+.dark .dialog::backdrop { background: rgba(0, 0, 0, 0.8); }
+/* Widths are the old content-box sizes plus padding and border, since Basecoat's
+   preflight makes everything border-box */
+.dialog > div {
+    max-width: min(512px, calc(100% - 2rem));
+    padding: 30px;
+    gap: 20px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--card);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    font-size: 1rem;
+}
+.dialog > .dialog-narrow { max-width: min(442px, calc(100% - 2rem)); }
+.dialog h2 {
+    font-size: 1.17rem;
+    font-weight: 700;
+    line-height: normal;
     color: var(--primary);
-    display: block;
 }
-.stat-label {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+.dialog h2.danger { color: var(--destructive); }
+.dialog-subtitle {
+    font-size: 0.9rem;
+    color: var(--muted-foreground);
 }
-section {
-    margin-bottom: 0px;
+.dialog > div > footer {
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 10px;
 }
-h2 {
-    font-size: 1.25rem;
+.dialog-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+#deleteBtn { margin-inline-end: auto; }
+
+.error-list {
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--inset);
+    border-radius: 12px;
+    padding: 15px;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--destructive);
+}
+.error-list div {
+    padding: 4px 0;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 10px;
-    margin-bottom: 15px;
 }
+
+/* ── Station list ──────────────────────────────────────────────────────────── */
 .stream-group {
     margin-bottom: 5px;
 }
@@ -338,10 +356,10 @@ h2 {
     border-radius: 12px;
     transition: all 0.2s;
     flex-shrink: 0;
-    width: 210px;
+    width: 240px; /* 210px content + padding, now that everything is border-box */
 }
 .stream-item:hover {
-    background: var(--surface-hover);
+    background: var(--muted);
     transform: translateY(-2px);
 }
 .stream-logo {
@@ -396,61 +414,35 @@ h2 {
     padding-top: 6px;
     border-top: 1px solid var(--border);
 }
-.action-link {
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    padding: 6px 10px;
-    border-radius: 8px;
-    font-size: 0.7rem;
-    text-decoration: none;
-    transition: all 0.2s;
-    white-space: nowrap;
-    cursor: pointer;
-}
-.action-link:hover {
-    background: var(--surface-active);
-    color: var(--text);
-    border-color: var(--primary);
-}
-.action-link.playing {
-    background: var(--error-bg);
-    color: var(--error);
-    border-color: var(--error-bg-hover);
-}
-.action-link.playing:hover {
-    background: var(--error-bg-hover);
-    color: var(--error-light);
-}
-.error-log {
-    background: var(--error-bg-subtle);
-    border: 1px solid var(--error-bg);
-    padding: 15px;
-    border-radius: 12px;
-    font-family: monospace;
-    font-size: 0.875rem;
-    color: var(--error-light);
-    max-height: 200px;
-    overflow-y: auto;
-}
-.badge {
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-.badge-success { background: var(--success-bg); color: var(--success-light); }
-.badge-error { background: var(--error-bg-hover); color: var(--error-light); }
 
-/* Playback Bar Styles */
+/* Stream availability indicator */
+.avail-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+.avail-available { background: var(--success); }
+.avail-available.live {
+    background: var(--success);
+    box-shadow: 0 0 0 var(--success-glow);
+    animation: pulse 2s infinite;
+}
+.avail-unavailable { background: var(--destructive); }
+.avail-checking { background: var(--text-dim); }
+
+/* ── Playback bar ──────────────────────────────────────────────────────────── */
 .playback-bar {
     position: fixed;
     bottom: 24px;
     left: 50%;
     transform: translateX(-50%);
-    width: calc(100% - 48px);
-    max-width: 500px;
-    background: var(--card-glass);
+    /* content size + 34px padding and border, as before border-box */
+    width: calc(100% - 48px + 34px);
+    max-width: 534px;
+    background: var(--glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
@@ -496,78 +488,62 @@ h2 {
 .playback-name {
     font-size: 0.9rem;
     font-weight: 600;
-    color: var(--text);
+    color: var(--foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .playback-status {
     font-size: 0.7rem;
-    color: var(--text-muted);
+    color: var(--muted-foreground);
 }
-.stop-btn {
-    background: var(--error-bg) !important;
-    color: var(--error) !important;
-    border: 1px solid var(--error-bg-hover) !important;
-    padding: 6px 14px !important;
-    font-size: 0.75rem !important;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.stop-btn:hover {
-    background: var(--error-bg-hover) !important;
-    color: white !important;
-}
-
-/* Volume Slider Styles */
 .volume-container {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
 }
-.volume-slider {
-    -webkit-appearance: none;
-    width: 100%;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--surface-hover);
-    outline: none;
+.volume-icon {
+    width: auto;
+    height: auto;
+    padding: 0;
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
 }
+/* Basecoat slider, slimmed to the original 4px track and 12px solid thumb */
+.volume-slider {
+    width: 100%;
+    height: 12px;
+    --slider-track-height: 4px;
+    --slider-thumb-size: 12px;
+}
+.volume-slider::-webkit-slider-runnable-track { height: 4px; }
+.volume-slider::-moz-range-track { height: 4px; }
 .volume-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
     width: 12px;
     height: 12px;
-    border-radius: 50%;
+    border: 0;
     background: var(--primary);
     cursor: pointer;
-    border: none;
 }
 .volume-slider::-moz-range-thumb {
     width: 12px;
     height: 12px;
-    border-radius: 50%;
+    border: 0;
     background: var(--primary);
     cursor: pointer;
-    border: none;
 }
-.volume-icon {
-    color: var(--text-muted);
-    font-size: 0.8rem;
-}
-/* DLNA Modal List */
+
+/* ── Cast dialog ───────────────────────────────────────────────────────────── */
 .device-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    margin-top: 15px;
     max-height: 250px;
     overflow-y: auto;
 }
 .device-item {
-    background: var(--surface-raised);
+    background: var(--secondary);
     border: 1px solid var(--border);
     padding: 12px;
     border-radius: 12px;
@@ -578,7 +554,7 @@ h2 {
     transition: all 0.2s;
 }
 .device-item:hover {
-    background: var(--surface-hover);
+    background: var(--muted);
     border-color: var(--primary);
 }
 .device-info {
@@ -588,7 +564,7 @@ h2 {
 .device-name {
     font-size: 0.9rem;
     font-weight: 500;
-    color: var(--text);
+    color: var(--foreground);
 }
 .device-location {
     font-size: 0.7rem;
@@ -599,22 +575,20 @@ h2 {
     font-size: 1.2rem;
 }
 
-/* Reorder Modal */
-.reorder-modal {
-    max-width: 520px;
-    display: flex;
-    flex-direction: column;
-    max-height: 80vh;
+/* ── Reorder dialog ────────────────────────────────────────────────────────── */
+.dialog > .reorder-modal {
+    max-width: min(582px, calc(100% - 2rem));
+    max-height: min(calc(80vh + 62px), calc(100% - 2rem));
+    gap: 16px;
 }
-.reorder-modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
+.dialog > div > header > .dialog-hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
 }
 .reorder-list {
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -653,7 +627,7 @@ h2 {
 }
 .reorder-item.drag-over {
     border-color: var(--primary);
-    background: var(--surface-raised);
+    background: var(--secondary);
 }
 .drag-handle {
     color: var(--text-dim);
@@ -672,31 +646,8 @@ h2 {
 .reorder-name {
     flex: 1;
     font-size: 0.82rem;
-    color: var(--text);
+    color: var(--foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.reorder-group-tag {
-    font-size: 0.65rem;
-    color: var(--text-dim);
-    flex-shrink: 0;
-}
-
-/* Stream availability indicator */
-.avail-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    position: absolute;
-    top: 10px;
-    right: 10px;
-}
-.avail-available { background: var(--success); }
-.avail-available.live {
-    background: var(--success);
-    box-shadow: 0 0 0 var(--success-glow);
-    animation: pulse 2s infinite;
-}
-.avail-unavailable { background: var(--error); }
-.avail-checking { background: var(--text-dim); }
