@@ -1,883 +1,363 @@
-let currentCastStreamId = null;
+// Live2Audio dashboard. One Alpine component on <body> holds the page state and
+// index.html renders from it; this file is loaded before Alpine so 'alpine:init' fires here.
 
-// Escape text destined for innerHTML so station/device strings can't inject markup.
-function escapeHtml(s) {
-    return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+const LIGHT_SCHEME = window.matchMedia('(prefers-color-scheme: light)');
+
+// DLNA targets are device UDNs unless they look like an IP or URL from the manual field
+function castTargetPayload(target) {
+    return target.includes('://') || target.includes('.') ? { manual_location: target } : { udn: target };
 }
 
-
-// Basecoat's dark styles key off html.dark, so 'auto' is resolved here rather than in CSS.
-// Dark unless the OS asks for light, matching the original stylesheet's default.
-const lightSchemeQuery = window.matchMedia('(prefers-color-scheme: light)');
-
-function applyTheme(mode) {
-    const dark = mode === 'dark' || (mode === 'auto' && !lightSchemeQuery.matches);
-    document.documentElement.classList.toggle('dark', dark);
-}
-
-function initTheme() {
-    const stored = localStorage.getItem('theme');
-    const mode = stored === 'light' || stored === 'dark' ? stored : 'auto';
-    applyTheme(mode);
-    updateThemeBtn(mode);
-    // Keep following the OS while in auto mode
-    lightSchemeQuery.addEventListener('change', () => applyTheme(localStorage.getItem('theme') || 'auto'));
-}
-
-function updateThemeBtn(mode) {
-    const btn = document.getElementById('themeBtn');
-    if (!btn) return;
-    btn.innerText = { auto: '🕘', light: '☀️', dark: '🌙' }[mode] || '🕘';
-}
-
-function updatePlayBtns(activeId) {
-    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-        const isActive = activeId != null && btn.id === `play-btn-${activeId}`;
-        btn.innerText = isActive ? '⏹' : '▶';
-        btn.title = isActive ? 'Stop' : 'Play';
-        btn.dataset.variant = isActive ? 'destructive' : 'outline';
+function postJSON(url, body) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
     });
 }
 
-function cycleTheme() {
-    const current = localStorage.getItem('theme') || 'auto';
-    const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
-    if (next === 'auto') {
-        localStorage.removeItem('theme');
-    } else {
-        localStorage.setItem('theme', next);
-    }
-    applyTheme(next);
-    updateThemeBtn(next);
+function groupOf(stream) {
+    return stream.tvg_id || 'Other';
 }
 
-function safeSetText(id, text) {
-    const el = document.getElementById(id);
-    if (el) {
-        el.innerText = text;
-    } else {
-        console.warn(`[SafeSetText] Element #${id} not found.`);
-    }
-}
+const BLANK_STATION = { editing: false, oldUrl: '', url: '', name: '', id: '', group: '' };
 
-function openCastModal(streamId, stationName) {
-    currentCastStreamId = streamId;
-    safeSetText('castStationName', "Target Station: " + stationName);
-    document.getElementById('castDialog').showModal();
-    loadDevices();
-}
+document.addEventListener('alpine:init', () => {
+    Alpine.data('dashboard', () => ({
+        serverId: '',
+        online: true,
+        uptime: '',
+        liveCount: 0,
+        errors: [],
+        streams: [],
+        loaded: false,
+        // { id, name, logo, castTarget?, castingTo? }, mirrored to sessionStorage
+        nowPlaying: null,
+        volume: 0.5,
+        prevVolume: null,
+        theme: 'auto',
+        m3uStatus: null,
+        form: { ...BLANK_STATION },
+        saving: false,
+        deleting: false,
+        cast: { stream: null, devices: [], note: '', noteError: false, scanning: false, busy: null, manual: '' },
+        reorder: { items: [], status: 'loading', dragIdx: null, overIdx: null },
+        reorderStatus: null,
 
-// currentCastStreamId is cleared by the dialog's 'close' listener, so Esc resets it too
-function closeCastModal() {
-    document.getElementById('castDialog').close();
-}
+        init() {
+            const { serverId, uptime, liveCount } = this.$el.dataset;
+            Object.assign(this, { serverId, uptime, liveCount: Number(liveCount) });
 
-async function loadDevices() {
-    const list = document.getElementById('device-list');
-    try {
-        const response = await fetch('/api/dlna/devices');
-        const devices = await response.json();
-        
-        if (devices.length === 0) {
-            list.innerHTML = '<p class="note">No DLNA devices found. Try refreshing.</p>';
-            return;
-        }
+            // A different server id means the service restarted, so saved playback is stale
+            if (sessionStorage.getItem('server_id') !== serverId) sessionStorage.removeItem('nowPlaying');
+            sessionStorage.setItem('server_id', serverId);
+            this.nowPlaying = JSON.parse(sessionStorage.getItem('nowPlaying'));
+            this.$watch('nowPlaying', np => {
+                if (np) sessionStorage.setItem('nowPlaying', JSON.stringify(np));
+                else sessionStorage.removeItem('nowPlaying');
+            });
 
-        list.innerHTML = '';
-        devices.forEach(d => {
-            const item = document.createElement('div');
-            item.className = 'device-item';
+            // The <audio> element applies the volume itself via x-effect
+            const savedVolume = parseFloat(localStorage.getItem('userVolume'));
+            if (!Number.isNaN(savedVolume)) this.volume = savedVolume;
+            this.$watch('volume', v => localStorage.setItem('userVolume', v));
 
-            const info = document.createElement('div');
-            info.className = 'device-info';
-            const nameEl = document.createElement('span');
-            nameEl.className = 'device-name';
-            nameEl.textContent = d.name || 'DLNA Device';
-            const locEl = document.createElement('span');
-            locEl.className = 'device-location';
-            locEl.textContent = d.location || '';
-            info.appendChild(nameEl);
-            info.appendChild(locEl);
+            const storedTheme = localStorage.getItem('theme');
+            if (storedTheme === 'light' || storedTheme === 'dark') this.theme = storedTheme;
+            this.$watch('theme', theme => {
+                if (theme === 'auto') localStorage.removeItem('theme');
+                else localStorage.setItem('theme', theme);
+                this.applyTheme();
+            });
+            LIGHT_SCHEME.addEventListener('change', () => this.applyTheme());
 
-            const icon = document.createElement('span');
-            icon.className = 'cast-icon';
-            icon.textContent = '📺';
+            updateFaviconBadge(this.liveCount);
+            this.$watch('liveCount', updateFaviconBadge);
 
-            item.appendChild(info);
-            item.appendChild(icon);
-            item.addEventListener('click', (event) => castToDevice(d.udn, event));
-            list.appendChild(item);
-        });
-    } catch (e) {
-        list.innerHTML = '<p class="note note-error">Failed to load devices.</p>';
-    }
-}
+            this.refresh();
+            setInterval(() => this.refresh(), 10000);
+        },
 
-async function refreshDevices() {
-    const btn = document.getElementById('refreshDevicesBtn');
-    const list = document.getElementById('device-list');
-    const originalText = btn.innerText;
-    
-    btn.innerText = '⌛ Scanning...';
-    btn.disabled = true;
-    list.innerHTML = '<p class="note">Scanning for devices...</p>';
-    
-    try {
-        const response = await fetch('/api/dlna/refresh', { method: 'POST' });
-        const devices = await response.json();
-        
-        if (devices.length === 0) {
-            list.innerHTML = '<p class="note">No DLNA devices found.</p>';
-        } else {
-            loadDevices();
-        }
-    } catch (e) {
-        list.innerHTML = '<p class="note note-error">Scan failed.</p>';
-    } finally {
-        btn.innerText = originalText;
-        btn.disabled = false;
-    }
-}
+        async refresh() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) throw new Error('Offline');
+                const data = await response.json();
+                this.online = true;
+                this.uptime = data.uptime;
+                this.liveCount = data.live_count;
+                this.errors = data.errors || [];
 
-async function castToDevice(udn, castEvent) {
-    if (!currentCastStreamId) return;
-    
-    const item = castEvent ? castEvent.currentTarget : null;
-    const originalBg = item ? item.style.background : '';
-    if (item) item.style.background = 'rgba(148, 163, 184, 0.2)';
-    
-    // Get station metadata BEFORE closing modal
-    const castStationElem = document.getElementById('castStationName');
-    const stationName = castStationElem ? castStationElem.innerText.replace('Target Station: ', '') : 'Unknown Station';
-    
-    // Find the logo from the main list for this station
-    let logo = '';
-    const activeBtn = document.getElementById(`play-btn-${currentCastStreamId}`);
-    if (activeBtn) {
-        const item = activeBtn.closest('.stream-item');
-        const logoElem = item ? item.querySelector('.stream-logo') : null;
-        if (logoElem) logo = logoElem.src;
-    }
+                if (data.server_id && data.server_id !== this.serverId) {
+                    console.log("Server restart detected, clearing stale playback state.");
+                    this.serverId = data.server_id;
+                    sessionStorage.setItem('server_id', data.server_id);
+                    this.endPlayback();
+                }
 
-    const payload = { video_id: currentCastStreamId };
-    if (typeof udn === 'string' && (udn.includes('://') || udn.includes('.'))) {
-        payload.manual_location = udn;
-    } else {
-        payload.udn = udn;
-    }
-
-    try {
-        const response = await fetch('/api/dlna/cast', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-            // Update playback bar for DLNA
-            const bar = document.getElementById('playback-bar');
-            
-            safeSetText('playback-station-name', stationName);
-            safeSetText('playback-status', `Casting to ${result.device_name || 'Device'}`);
-            const logoPlaying = document.getElementById('playback-logo');
-            if (logoPlaying) logoPlaying.src = logo;
-            
-            if (bar) bar.style.display = 'flex';
-            
-            // Set session storage
-            sessionStorage.setItem('isPlaying', currentCastStreamId);
-            sessionStorage.setItem('isCasting', 'true');
-            sessionStorage.setItem('castDeviceTarget', udn); 
-            sessionStorage.setItem('stationName', stationName);
-            sessionStorage.setItem('stationLogo', logo);
-            sessionStorage.setItem('castingTo', result.device_name || 'Device');
-            
-            // Stop any local playback
-            const audio = document.getElementById('main-audio');
-            if (audio) {
-                audio.pause();
-                audio.src = "";
+                // An empty list once stations have loaded is a transient server-side
+                // failure, so keep showing the last good list
+                if (data.streams.length || !this.streams.length) this.streams = data.streams;
+                this.loaded = true;
+            } catch (e) {
+                console.error("Dashboard update failed", e);
+                this.online = false;
             }
-            
-            // Update local play buttons
-            updatePlayBtns(currentCastStreamId);
+        },
 
-            closeCastModal();
-        } else {
-            alert('Cast failed: ' + result.message);
-        }
-    } catch (e) {
-        console.error('Cast Error:', e);
-        alert('Request failed: ' + e.message);
-    } finally {
-        if (item) item.style.background = originalBg;
-    }
-}
+        // Stations grouped by tvg_id, in playlist order
+        get groups() {
+            const groups = new Map();
+            for (const stream of this.streams) {
+                const name = groupOf(stream);
+                if (!groups.has(name)) groups.set(name, { name, streams: [] });
+                groups.get(name).streams.push(stream);
+            }
+            return [...groups.values()];
+        },
 
-function castToManualIp() {
-    const ip = document.getElementById('manualDeviceIp').value.trim();
-    if (!ip) return alert('Please enter an IP or URL');
-    castToDevice(ip, null);
-}
-function copyLink(url) {
-    navigator.clipboard.writeText(url).then(() => {
-        alert('Copied stream URL to clipboard!');
-    });
-}
+        isPlaying(stream) {
+            return this.nowPlaying?.id === stream.id;
+        },
 
-function clearPlaybackState() {
-    // Clear session storage
-    sessionStorage.removeItem('isPlaying');
-    sessionStorage.removeItem('isCasting');
-    sessionStorage.removeItem('castDeviceTarget');
-    sessionStorage.removeItem('stationName');
-    sessionStorage.removeItem('stationLogo');
-    sessionStorage.removeItem('castingTo');
+        dotClass(stream) {
+            const live = stream.listeners > 0 && stream.availability === 'available';
+            return `avail-${stream.availability || 'checking'}${live ? ' live' : ''}`;
+        },
 
-    // Update UI elements
-    const bar = document.getElementById('playback-bar');
-    if (bar) bar.style.display = 'none';
-    
-    const audio = document.getElementById('main-audio');
-    if (audio) {
-        audio.pause();
-        audio.src = "";
-        audio.load();
-    }
+        dotTitle(stream) {
+            return stream.listeners > 0 ? `${stream.listeners} listening` : (stream.availability || 'checking');
+        },
 
-    // Reset all play buttons
-    updatePlayBtns(null);
+        subText(stream) {
+            return stream.id + (stream.listeners > 0 ? ` • ${stream.listeners} listening` : '');
+        },
 
-    // Update dynamic favicon and stats
-    updateDashboard();
-}
+        // Names wider than their tile scroll once when first shown, then on hover
+        marquee(el) {
+            const overflow = el.scrollWidth - el.parentElement.clientWidth;
+            if (overflow <= 0) return;
+            el.style.setProperty('--marquee-offset', `-${overflow}px`);
+            el.classList.add('init-play');
+            el.addEventListener('animationend', () => el.classList.remove('init-play'), { once: true });
+        },
 
-async function stopAllAudio() {
-    const audio = document.getElementById('main-audio');
-    
-    // If we were casting, send a stop request to the backend
-    const isCasting = sessionStorage.getItem('isCasting');
-    const castTarget = sessionStorage.getItem('castDeviceTarget');
-    if (isCasting === 'true' && castTarget) {
-        const payload = {};
-        if (castTarget.includes('.') || castTarget.includes('://')) {
-            payload.manual_location = castTarget;
-        } else {
-            payload.udn = castTarget;
-        }
-        
-        try {
-            await fetch('/api/dlna/stop', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        } catch (e) {
-            console.error("Failed to stop DLNA:", e);
-        }
-    }
+        applyTheme() {
+            const dark = this.theme === 'dark' || (this.theme === 'auto' && !LIGHT_SCHEME.matches);
+            document.documentElement.classList.toggle('dark', dark);
+        },
 
-    clearPlaybackState();
-}
+        cycleTheme() {
+            this.theme = { auto: 'light', light: 'dark', dark: 'auto' }[this.theme];
+        },
 
-function togglePlayer(id) {
-    const audio = document.getElementById('main-audio');
-    const bar = document.getElementById('playback-bar');
-    const currentPlayingId = sessionStorage.getItem('isPlaying');
-    
-    if (currentPlayingId === id) {
-        // Stop if clicking the same one
-        stopAllAudio();
-        return;
-    }
+        // ── Playback ──────────────────────────────────────────────────────────
 
-    // New station logic
-    audio.pause();
-    audio.src = `/stream.mp3?v=${id}`;
-    audio.play().catch(e => console.log("Play failed:", e));
-    sessionStorage.setItem('isPlaying', id);
+        togglePlay(stream) {
+            if (this.isPlaying(stream)) return this.stop();
+            const audio = this.$refs.audio;
+            audio.src = `/stream.mp3?v=${stream.id}`;
+            audio.play().catch(e => console.log("Play failed:", e));
+            this.nowPlaying = { id: stream.id, name: stream.name, logo: stream.logo };
+            this.refresh();
+        },
 
-    // Update UI state
-    updatePlayBtns(id);
-
-    // Update and show playback bar
-    const item = document.getElementById(`play-btn-${id}`).closest('.stream-item');
-    const nameElem = item.querySelector('.station-name-text');
-    const name = nameElem ? nameElem.innerText : 'Unknown Station';
-    const logoElem = item.querySelector('.stream-logo');
-    const logo = logoElem ? logoElem.src : '';
-    
-    safeSetText('playback-station-name', name);
-    safeSetText('playback-status', 'Currently Playing');
-    const logoPlaying = document.getElementById('playback-logo');
-    if (logoPlaying) logoPlaying.src = logo;
-    if (bar) bar.style.display = 'flex';
-
-    // Persist state
-    sessionStorage.setItem('isPlaying', id);
-    sessionStorage.setItem('isCasting', 'false');
-    sessionStorage.setItem('stationName', name);
-    sessionStorage.setItem('stationLogo', logo);
-
-    // Update live count immediately
-    updateDashboard();
-}
-
-function restoreUIState() {
-    const isPlaying = sessionStorage.getItem('isPlaying');
-    if (!isPlaying) return;
-
-    const isCasting = sessionStorage.getItem('isCasting') === 'true';
-    const name = sessionStorage.getItem('stationName');
-    const logo = sessionStorage.getItem('stationLogo');
-    const castingTo = sessionStorage.getItem('castingTo');
-
-    const bar = document.getElementById('playback-bar');
-    if (bar) {
-        safeSetText('playback-station-name', name || 'Station');
-        safeSetText('playback-status', isCasting ? `Casting to ${castingTo || 'Device'}` : 'Currently Playing');
-        const logoPlaying = document.getElementById('playback-logo');
-        if (logoPlaying && logo) logoPlaying.src = logo;
-        bar.style.display = 'flex';
-    }
-
-    // Update play buttons on the page (they might be re-rendered by updateDashboard)
-    setTimeout(() => updatePlayBtns(isPlaying), 500);
-}
-
-// Global volume control listener
-document.addEventListener('DOMContentLoaded', () => {
-    initTheme();
-    const currentServerId = SERVER_ID;
-    const storedServerId = sessionStorage.getItem('server_id');
-    
-    if (storedServerId && storedServerId !== currentServerId) {
-        console.log("Service restart detected on load, cleaning session storage.");
-        clearPlaybackState();
-    }
-    
-    sessionStorage.setItem('server_id', currentServerId);
-    restoreUIState();
-
-    // Reset per-dialog state however a dialog closes (buttons or Esc)
-    document.getElementById('castDialog').addEventListener('close', () => {
-        currentCastStreamId = null;
-    });
-    document.getElementById('reorderDialog').addEventListener('close', () => {
-        reorderData = [];
-        dragSrcIdx = null;
-    });
-
-    const volControl = document.getElementById('volume-control');
-    volControl.addEventListener('input', (e) => {
-        const vol = e.target.value;
-        document.getElementById('main-audio').volume = vol;
-        localStorage.setItem('userVolume', vol);
-        syncVolumeFill(volControl);
-
-        const muteBtn = document.getElementById('mute-btn');
-        if (muteBtn) {
-            muteBtn.innerText = vol == 0 ? '🔇' : '🔊';
-        }
-    });
-
-    // Load saved volume
-    const savedVol = localStorage.getItem('userVolume');
-    if (savedVol !== null) {
-        volControl.value = savedVol;
-    }
-    syncVolumeFill(volControl);
-
-    window.toggleMute = function() {
-        const audio = document.getElementById('main-audio');
-        const volControl = document.getElementById('volume-control');
-        const muteBtn = document.getElementById('mute-btn');
-        
-        if (audio.volume > 0) {
-            // Store previous volume and mute
-            audio.dataset.prevVol = audio.volume;
-            audio.volume = 0;
-            volControl.value = 0;
-            if (muteBtn) muteBtn.innerText = '🔇';
-        } else {
-            // Unmute to previous volume or 50%
-            const prevVol = audio.dataset.prevVol || 0.5;
-            audio.volume = prevVol;
-            volControl.value = prevVol;
-            if (muteBtn) muteBtn.innerText = '🔊';
-        }
-        syncVolumeFill(volControl);
-        localStorage.setItem('userVolume', audio.volume);
-    };
-
-    // Set initial mute icon if saved volume is 0
-    if (savedVol !== null && parseFloat(savedVol) === 0) {
-        const muteBtn = document.getElementById('mute-btn');
-        if (muteBtn) muteBtn.innerText = '🔇';
-    }
-
-    // Initial dashboard update
-    updateDashboard();
-});
-
-// Basecoat's slider fills the track up to --slider-value
-function syncVolumeFill(input) {
-    const pct = (input.value - input.min) / (input.max - input.min) * 100;
-    input.style.setProperty('--slider-value', `${pct}%`);
-}
-
-function openModal() {
-    document.getElementById('modalTitle').innerText = "Add New Station";
-    document.getElementById('oldStationUrl').value = "";
-    document.getElementById('stationUrl').value = "";
-    document.getElementById('stationName').value = "";
-    document.getElementById('stationId').value = "";
-    document.getElementById('stationGroup').value = "";
-    document.getElementById('deleteBtn').hidden = true;
-    document.getElementById('stationDialog').showModal();
-}
-
-function openEditModal(id, name, url, group, tvg_id) {
-    document.getElementById('modalTitle').innerText = "Edit Station";
-    document.getElementById('oldStationUrl').value = url;
-    document.getElementById('stationUrl').value = url;
-    document.getElementById('stationName').value = name;
-    document.getElementById('stationId').value = tvg_id;
-    document.getElementById('stationGroup').value = group;
-    document.getElementById('deleteBtn').hidden = false;
-    document.getElementById('stationDialog').showModal();
-}
-
-function openDeleteConfirmModal() {
-    const name = document.getElementById('stationName').value;
-    document.getElementById('deleteConfirmText').innerText = `Delete "${name}"? This will remove it from the M3U file and cannot be undone.`;
-    document.getElementById('deleteConfirmDialog').showModal();
-}
-
-function closeDeleteConfirmModal() {
-    document.getElementById('deleteConfirmDialog').close();
-}
-
-async function confirmDeleteStation() {
-    const url = document.getElementById('oldStationUrl').value;
-    const btn = document.getElementById('confirmDeleteBtn');
-    btn.disabled = true;
-    btn.innerText = 'Deleting...';
-
-    try {
-        const response = await fetch('/delete_station', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        if (response.ok) {
-            closeDeleteConfirmModal();
-            closeModal();
-            updateDashboard();
-        } else {
-            const err = await response.json();
-            alert('Error: ' + err.message);
-        }
-    } catch (e) {
-        alert('Request failed');
-    } finally {
-        btn.disabled = false;
-        btn.innerText = 'Delete';
-    }
-}
-
-function closeModal() {
-    document.getElementById('stationDialog').close();
-}
-
-function openErrorModal() {
-    document.getElementById('errorDialog').showModal();
-}
-
-function closeErrorModal() {
-    document.getElementById('errorDialog').close();
-}
-
-async function updateDashboard() {
-    const badge = document.getElementById('system-status-badge');
-    try {
-        const response = await fetch('/api/stats');
-        if (!response.ok) throw new Error('Offline');
-        const data = await response.json();
-        
-        safeSetText('system-status-badge', '● ONLINE');
-        const badge = document.getElementById('system-status-badge');
-        if (badge) badge.dataset.variant = 'success';
-        
-        // Update dynamic favicon badge
-        updateFaviconBadge(data.live_count);
-        
-        safeSetText('uptime-val', data.uptime);
-        safeSetText('live-count-val', data.live_count);
-        
-        // Check for server restart
-        const storedServerId = sessionStorage.getItem('server_id');
-        if (data.server_id && storedServerId && data.server_id !== storedServerId) {
-            console.log("Server restart detected, clearing stale playback state.");
-            clearPlaybackState();
-        }
-        if (data.server_id) {
-            sessionStorage.setItem('server_id', data.server_id);
-        }
-
-        const container = document.getElementById('stream-list-container');
-        if (data.streams.length > 0) {
-            const playingId = sessionStorage.getItem('isPlaying');
-
-            // Group by tvg_id preserving order
-            const groupMap = {};
-            const groupOrder = [];
-            data.streams.forEach(stream => {
-                const key = stream.tvg_id || 'Other';
-                if (!groupMap[key]) { groupMap[key] = []; groupOrder.push(key); }
-                groupMap[key].push(stream);
-            });
-
-            // Build index of existing stream-item elements keyed by stream id
-            const existingItems = {};
-            container.querySelectorAll('.stream-item[data-stream-id]').forEach(el => {
-                existingItems[el.dataset.streamId] = el;
-            });
-
-            // Build/update group containers, patching existing items in place
-            const seenIds = new Set();
-            const seenGroups = new Set();
-
-            groupOrder.forEach(key => {
-                seenGroups.add(key);
-                let groupEl = container.querySelector(`.stream-group[data-group="${CSS.escape(key)}"]`);
-                if (!groupEl) {
-                    groupEl = document.createElement('div');
-                    groupEl.className = 'stream-group';
-                    groupEl.dataset.group = key;
-                    groupEl.innerHTML = `<div class="group-header">${escapeHtml(key)}</div><div class="stream-list"></div>`;
-                    container.appendChild(groupEl);
+        async stop() {
+            const target = this.nowPlaying?.castTarget;
+            if (target) {
+                try {
+                    await postJSON('/api/dlna/stop', castTargetPayload(target));
+                } catch (e) {
+                    console.error("Failed to stop DLNA:", e);
                 }
-                const listEl = groupEl.querySelector('.stream-list');
+            }
+            this.endPlayback();
+            this.refresh();
+        },
 
-                groupMap[key].forEach((stream, idx) => {
-                    seenIds.add(stream.id);
-                    const avail = stream.availability || 'checking';
-                    const live = stream.listeners > 0 && avail === 'available';
-                    const dotTitle = stream.listeners > 0 ? `${stream.listeners} listening` : avail;
-                    const subText = `${stream.id}${stream.listeners > 0 ? ' • ' + stream.listeners + ' listening' : ''}`;
+        endPlayback() {
+            this.nowPlaying = null;
+            const audio = this.$refs.audio;
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+        },
 
-                    let item = existingItems[stream.id];
-                    if (!item) {
-                        // Create new element only when it doesn't exist yet
-                        item = document.createElement('div');
-                        item.className = 'stream-item';
-                        item.dataset.streamId = stream.id;
-                        // Build with escaped text; user-controlled values (name/url/
-                        // group/tvg_id) go through closures, never an inline handler string.
-                        item.innerHTML = `
-                            <span class="avail-dot avail-${escapeHtml(avail)}${live ? ' live' : ''}" title="${escapeHtml(dotTitle)}"></span>
-                            <img src="${escapeHtml(stream.logo || '')}" class="stream-logo" alt="Logo" onerror="this.style.background='var(--logo-placeholder)'">
-                            <div class="stream-info">
-                                <div class="stream-name-wrapper">
-                                    <span class="station-name-text">${escapeHtml(stream.name)}</span>
-                                </div>
-                                <span class="stream-sub">${escapeHtml(subText)}</span>
-                            </div>
-                            <div class="stream-actions">
-                                <button title="Play" class="btn play-btn" data-variant="${stream.id === playingId ? 'destructive' : 'outline'}" data-size="xs" id="play-btn-${escapeHtml(stream.id)}">${stream.id === playingId ? '⏹' : '▶'}</button>
-                                <button title="Cast" class="btn cast-btn" data-variant="outline" data-size="xs">📺</button>
-                                <button title="Edit" class="btn edit-btn" data-variant="outline" data-size="xs">✎</button>
-                                <a title="YouTube" href="https://www.youtube.com/watch?v=${encodeURIComponent(stream.id)}" class="btn" data-variant="outline" data-size="xs" target="_blank">↗</a>
-                            </div>`;
-                        listEl.appendChild(item);
+        toggleMute() {
+            if (this.volume > 0) {
+                this.prevVolume = this.volume;
+                this.volume = 0;
+            } else {
+                this.volume = this.prevVolume || 0.5;
+            }
+        },
 
-                        item.querySelector('.play-btn').addEventListener('click', () => togglePlayer(stream.id));
-                        item.querySelector('.cast-btn').addEventListener('click', () => openCastModal(stream.id, stream.name));
-                        item.querySelector('.edit-btn').addEventListener('click', () => openEditModal(stream.id, stream.name, stream.url, stream.group, stream.tvg_id));
+        // ── Casting ───────────────────────────────────────────────────────────
 
-                        // Measure marquee after insert, play once then rely on hover
-                        const nameEl = item.querySelector('.station-name-text');
-                        const overflow = nameEl.scrollWidth - nameEl.parentElement.clientWidth;
-                        if (overflow > 0) {
-                            nameEl.style.setProperty('--marquee-offset', `-${overflow}px`);
-                            nameEl.classList.add('init-play');
-                            nameEl.addEventListener('animationend', () => nameEl.classList.remove('init-play'), { once: true });
-                        }
-                    } else {
-                        // Patch only changed attributes on existing element
-                        const dot = item.querySelector('.avail-dot');
-                        const dotClass = `avail-dot avail-${avail}${live ? ' live' : ''}`;
-                        if (dot.className !== dotClass) dot.className = dotClass;
-                        if (dot.title !== dotTitle) dot.title = dotTitle;
+        openCast(stream) {
+            this.cast.stream = stream;
+            this.$refs.castDialog.showModal();
+            this.loadDevices('/api/dlna/devices', 'Searching for devices...', 'No DLNA devices found. Try refreshing.', 'Failed to load devices.');
+        },
 
-                        const sub = item.querySelector('.stream-sub');
-                        if (sub.textContent !== subText) sub.textContent = subText;
+        async scanDevices() {
+            this.cast.scanning = true;
+            await this.loadDevices('/api/dlna/refresh', 'Scanning for devices...', 'No DLNA devices found.', 'Scan failed.', 'POST');
+            this.cast.scanning = false;
+        },
 
-                        const playBtn = item.querySelector(`#play-btn-${stream.id}`);
-                        const isActive = stream.id === playingId;
-                        const wantedLabel = isActive ? '⏹' : '▶';
-                        if (playBtn) {
-                            if (playBtn.innerText !== wantedLabel) playBtn.innerText = wantedLabel;
-                            playBtn.dataset.variant = isActive ? 'destructive' : 'outline';
-                        }
+        async loadDevices(url, loadingNote, emptyNote, errorNote, method = 'GET') {
+            Object.assign(this.cast, { devices: [], note: loadingNote, noteError: false });
+            try {
+                const devices = await (await fetch(url, { method })).json();
+                Object.assign(this.cast, { devices, note: devices.length ? '' : emptyNote });
+            } catch (e) {
+                Object.assign(this.cast, { note: errorNote, noteError: true });
+            }
+        },
 
-                        // Move into correct group list if it changed groups
-                        if (item.parentElement !== listEl) {
-                            const ref = listEl.children[idx] || null;
-                            listEl.insertBefore(item, ref);
-                        } else if (listEl.children[idx] !== item) {
-                            // Already in right list but wrong position — insertBefore the element
-                            // currently at idx (which shifts down), only if truly misplaced
-                            const ref = listEl.children[idx] || null;
-                            listEl.insertBefore(item, ref);
-                        }
-                    }
-                });
-            });
+        castManual() {
+            const target = this.cast.manual.trim();
+            if (!target) return alert('Please enter an IP or URL');
+            this.castTo(target);
+        },
 
-            // Remove items that no longer exist in data
-            Object.entries(existingItems).forEach(([id, el]) => {
-                if (!seenIds.has(id)) el.remove();
-            });
+        async castTo(target) {
+            const stream = this.cast.stream;
+            this.cast.busy = target;
+            try {
+                const response = await postJSON('/api/dlna/cast', { video_id: stream.id, ...castTargetPayload(target) });
+                const result = await response.json();
+                if (!result.success) return alert('Cast failed: ' + result.message);
+                this.endPlayback();
+                this.nowPlaying = {
+                    id: stream.id, name: stream.name, logo: stream.logo,
+                    castTarget: target, castingTo: result.device_name || 'Device'
+                };
+                this.$refs.castDialog.close();
+            } catch (e) {
+                console.error('Cast Error:', e);
+                alert('Request failed: ' + e.message);
+            } finally {
+                this.cast.busy = null;
+            }
+        },
 
-            // Remove groups that no longer exist
-            container.querySelectorAll('.stream-group[data-group]').forEach(el => {
-                if (!seenGroups.has(el.dataset.group)) el.remove();
-            });
+        // ── Stations ──────────────────────────────────────────────────────────
 
-            // Ensure group order matches groupOrder — only move if position is wrong
-            groupOrder.forEach((key, idx) => {
-                const groupEl = container.querySelector(`.stream-group[data-group="${CSS.escape(key)}"]`);
-                if (groupEl && container.children[idx] !== groupEl) {
-                    container.insertBefore(groupEl, container.children[idx] || null);
-                }
-            });
-        } else if (!container.querySelector('.stream-group')) {
-            // Only show "no stations" if we've never populated — empty response when list
-            // already exists is a transient server-side failure, don't wipe the display
-            container.innerHTML = '<p class="note">No stations found in youtube.m3u.</p>';
-        }
+        openStation(stream = null) {
+            this.form = stream
+                ? { editing: true, oldUrl: stream.url, url: stream.url, name: stream.name, id: stream.tvg_id, group: stream.group }
+                : { ...BLANK_STATION };
+            this.$refs.stationDialog.showModal();
+        },
 
-        // Update errors
-        const errorContainer = document.getElementById('error-log-container-modal');
-        const errorBtn = document.getElementById('errorBtn');
-        if (data.errors && data.errors.length > 0) {
-            let errorHtml = '';
-            // data.errors is deque(maxlen=10), so it's a list
-            data.errors.forEach(err => {
-                errorHtml += `<div>${escapeHtml(err)}</div>`;
-            });
-            errorContainer.innerHTML = errorHtml;
-            errorBtn.hidden = false;
-        } else {
-            errorContainer.innerHTML = '<p class="note">No errors reported in this session.</p>';
-            errorBtn.hidden = true;
-        }
-    } catch (e) {
-        console.error("Dashboard update failed", e);
-        badge.innerText = '● SYSTEM OFFLINE';
-        badge.dataset.variant = 'destructive';
-    }
-}
+        async saveStation() {
+            const f = this.form;
+            if (!f.url || !f.name) return alert('URL and Name are required');
+            // Blank optional fields fall back to their placeholder values
+            const body = {
+                url: f.url, name: f.name,
+                id: f.id || this.$refs.stationId.placeholder,
+                group: f.group || this.$refs.stationGroup.placeholder
+            };
+            if (f.oldUrl) body.old_url = f.oldUrl;
 
-// Update every 10 seconds
-setInterval(updateDashboard, 10000);
+            this.saving = true;
+            try {
+                const response = await postJSON(f.oldUrl ? '/edit_station' : '/add_station', body);
+                if (!response.ok) return alert('Error: ' + (await response.json()).message);
+                this.$refs.stationDialog.close();
+                this.refresh();
+            } catch (e) {
+                alert('Request failed');
+            } finally {
+                this.saving = false;
+            }
+        },
 
-async function handleStationSubmit() {
-    const oldUrl = document.getElementById('oldStationUrl').value;
-    const url = document.getElementById('stationUrl').value;
-    const name = document.getElementById('stationName').value;
-    const idEl = document.getElementById('stationId');
-    const groupEl = document.getElementById('stationGroup');
-    const id = idEl.value || idEl.placeholder;
-    const group = groupEl.value || groupEl.placeholder;
-    const btn = document.getElementById('submitBtn');
+        async deleteStation() {
+            this.deleting = true;
+            try {
+                const response = await postJSON('/delete_station', { url: this.form.oldUrl });
+                if (!response.ok) return alert('Error: ' + (await response.json()).message);
+                this.$refs.deleteDialog.close();
+                this.$refs.stationDialog.close();
+                this.refresh();
+            } catch (e) {
+                alert('Request failed');
+            } finally {
+                this.deleting = false;
+            }
+        },
 
-    if (!url || !name) return alert('URL and Name are required');
-
-    btn.disabled = true;
-    btn.innerText = 'Saving...';
-
-    const endpoint = oldUrl ? '/edit_station' : '/add_station';
-    const body = { url, name, id, group };
-    if (oldUrl) body.old_url = oldUrl;
-
-    try {
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        if (response.ok) {
-            closeModal();
-            updateDashboard();
-        } else {
-            const err = await response.json();
-            alert('Error: ' + err.message);
-        }
-    } catch (e) {
-        alert('Request failed');
-    } finally {
-        btn.disabled = false;
-        btn.innerText = 'Save Station';
-    }
-}
-
-async function refreshM3U() {
-    const btn = document.getElementById('refreshBtn');
-    const originalText = btn.innerText;
-    btn.innerText = '⌛ Refreshing...';
-    btn.disabled = true;
-    
-    try {
-        const response = await fetch('/refresh_m3u', { method: 'POST' });
-        if (response.ok) {
-            btn.innerText = '✅ Updated';
-            setTimeout(() => { 
-                btn.innerText = originalText;
-                btn.disabled = false;
-                updateDashboard();
-            }, 1000);
-        } else {
-            btn.innerText = '❌ Error';
-            setTimeout(() => { 
-                btn.innerText = originalText;
-                btn.disabled = false;
-            }, 2000);
-        }
-    } catch (e) {
-        btn.innerText = '❌ Failed';
-        setTimeout(() => { 
-            btn.innerText = originalText;
-            btn.disabled = false;
-        }, 2000);
-    }
-}
-
-// ── Reorder Modal ─────────────────────────────────────────────────────────────
-
-let reorderData = [];   // flat array of stream objects in current order
-let dragSrcIdx = null;
-
-function openReorderModal() {
-    document.getElementById('reorderDialog').showModal();
-    fetch('/api/stats')
-        .then(r => r.json())
-        .then(data => {
-            reorderData = data.streams || [];
-            renderReorderList();
-        })
-        .catch(() => {
-            document.getElementById('reorder-list').innerHTML =
-                '<p class="note note-error">Failed to load stations.</p>';
-        });
-}
-
-// reorderData/dragSrcIdx are reset by the dialog's 'close' listener, so Esc resets them too
-function closeReorderModal() {
-    document.getElementById('reorderDialog').close();
-}
-
-function renderReorderList() {
-    const list = document.getElementById('reorder-list');
-    if (!reorderData.length) {
-        list.innerHTML = '<p class="note">No stations.</p>';
-        return;
-    }
-
-    let html = '';
-    let prevGroup = null;
-    reorderData.forEach((stream, idx) => {
-        const group = stream.tvg_id || 'Other';
-        if (group !== prevGroup) {
-            html += `<div class="reorder-group-label">${escapeHtml(group)}</div>`;
-            prevGroup = group;
-        }
-        html += `
-        <div class="reorder-item" draggable="true" data-idx="${idx}">
-            <span class="drag-handle">⠿</span>
-            <img class="reorder-thumb" src="${escapeHtml(stream.logo || '')}" alt="" onerror="this.style.background='var(--logo-placeholder)'">
-            <span class="reorder-name">${escapeHtml(stream.name)}</span>
-        </div>`;
-    });
-    list.innerHTML = html;
-
-    list.querySelectorAll('.reorder-item').forEach(el => {
-        el.addEventListener('dragstart', onDragStart);
-        el.addEventListener('dragover',  onDragOver);
-        el.addEventListener('dragleave', onDragLeave);
-        el.addEventListener('drop',      onDrop);
-        el.addEventListener('dragend',   onDragEnd);
-    });
-}
-
-function onDragStart(e) {
-    dragSrcIdx = parseInt(e.currentTarget.dataset.idx);
-    e.currentTarget.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-}
-
-function onDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    e.currentTarget.classList.add('drag-over');
-}
-
-function onDragLeave(e) {
-    e.currentTarget.classList.remove('drag-over');
-}
-
-function onDrop(e) {
-    e.preventDefault();
-    e.currentTarget.classList.remove('drag-over');
-    const dropIdx = parseInt(e.currentTarget.dataset.idx);
-    if (dragSrcIdx === null || dragSrcIdx === dropIdx) return;
-    const moved = reorderData.splice(dragSrcIdx, 1)[0];
-    reorderData.splice(dropIdx, 0, moved);
-    dragSrcIdx = null;
-    renderReorderList();
-}
-
-function onDragEnd(e) {
-    e.currentTarget.classList.remove('dragging');
-    dragSrcIdx = null;
-}
-
-async function saveOrder() {
-    const btn = document.getElementById('saveOrderBtn');
-    btn.disabled = true;
-    btn.innerText = 'Saving…';
-    try {
-        const resp = await fetch('/reorder_stations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ order: reorderData.map(s => s.id) })
-        });
-        const result = await resp.json();
-        if (result.status === 'success') {
-            btn.innerText = '✅ Saved';
+        // Show a result on a button for a moment, then restore its label
+        flash(key, label, ms, then) {
+            this[key] = label;
             setTimeout(() => {
-                closeReorderModal();
-                btn.innerText = 'Save Order';
-                btn.disabled = false;
-                updateDashboard();
-            }, 800);
-        } else {
-            btn.innerText = '❌ Error';
-            setTimeout(() => { btn.innerText = 'Save Order'; btn.disabled = false; }, 2000);
+                this[key] = null;
+                then?.();
+            }, ms);
+        },
+
+        async refreshM3U() {
+            this.m3uStatus = '⌛ Refreshing...';
+            try {
+                const response = await fetch('/refresh_m3u', { method: 'POST' });
+                if (response.ok) this.flash('m3uStatus', '✅ Updated', 1000, () => this.refresh());
+                else this.flash('m3uStatus', '❌ Error', 2000);
+            } catch (e) {
+                this.flash('m3uStatus', '❌ Failed', 2000);
+            }
+        },
+
+        // ── Reorder ───────────────────────────────────────────────────────────
+
+        // Fetched fresh on open: the server drops any station missing from the saved order
+        async openReorder() {
+            this.reorder = { items: [], status: 'loading', dragIdx: null, overIdx: null };
+            this.$refs.reorderDialog.showModal();
+            try {
+                const data = await (await fetch('/api/stats')).json();
+                Object.assign(this.reorder, { items: data.streams || [], status: 'ready' });
+            } catch (e) {
+                this.reorder.status = 'error';
+            }
+        },
+
+        // A group label goes above the first station of each run of the same group
+        startsGroup(i) {
+            const items = this.reorder.items;
+            return i === 0 || groupOf(items[i - 1]) !== groupOf(items[i]);
+        },
+
+        dropAt(i) {
+            const from = this.reorder.dragIdx;
+            this.reorder.overIdx = this.reorder.dragIdx = null;
+            if (from === null || from === i) return;
+            const items = this.reorder.items;
+            items.splice(i, 0, items.splice(from, 1)[0]);
+        },
+
+        async saveOrder() {
+            this.reorderStatus = 'Saving…';
+            try {
+                const response = await postJSON('/reorder_stations', { order: this.reorder.items.map(s => s.id) });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.flash('reorderStatus', '✅ Saved', 800, () => {
+                        this.$refs.reorderDialog.close();
+                        this.refresh();
+                    });
+                } else {
+                    this.flash('reorderStatus', '❌ Error', 2000);
+                }
+            } catch (e) {
+                this.flash('reorderStatus', '❌ Failed', 2000);
+            }
         }
-    } catch {
-        btn.innerText = '❌ Failed';
-        setTimeout(() => { btn.innerText = 'Save Order'; btn.disabled = false; }, 2000);
-    }
-}
+    }));
+});
 
 function updateFaviconBadge(count) {
     const canvas = document.createElement('canvas');
@@ -895,7 +375,7 @@ function updateFaviconBadge(count) {
             ctx.beginPath();
             ctx.arc(48, 16, 14, 0, 2 * Math.PI);
             ctx.fill();
-            
+
             ctx.fillStyle = 'white';
             ctx.font = 'bold 18px Inter, system-ui, sans-serif';
             ctx.textAlign = 'center';

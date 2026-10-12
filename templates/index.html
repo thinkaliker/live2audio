@@ -10,171 +10,227 @@
     <link rel="stylesheet" href="/static/stylesheet.css">
     <script>(function(){var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&!matchMedia('(prefers-color-scheme: light)').matches);document.documentElement.classList.toggle('dark',d);}());</script>
 </head>
-<body>
+<body x-data="dashboard" data-server-id="{{ server_id }}" data-uptime="{{ uptime }}" data-live-count="{{ live_count }}">
     <div class="container">
         <header class="app-header">
             <div class="header-left">
                 <h1>Live2Audio</h1>
-                <span class="badge status-badge" data-variant="success" id="system-status-badge">● ONLINE</span>
+                <span class="badge status-badge" data-variant="success" :data-variant="online ? 'success' : 'destructive'" x-text="online ? '● ONLINE' : '● SYSTEM OFFLINE'">● ONLINE</span>
             </div>
 
             <div class="header-center">
                 <div class="mini-stat">
-                    <span class="mini-stat-value" id="uptime-val">{{ uptime }}</span>
+                    <span class="mini-stat-value" x-text="uptime">{{ uptime }}</span>
                     <span class="mini-stat-label">Uptime</span>
                 </div>
                 <div class="mini-stat">
-                    <span class="mini-stat-value" id="live-count-val">{{ live_count }}</span>
+                    <span class="mini-stat-value" x-text="liveCount">{{ live_count }}</span>
                     <span class="mini-stat-label">Live</span>
                 </div>
             </div>
 
             <div class="header-right">
-                <button class="btn" data-variant="destructive" data-size="sm" onclick="openErrorModal()" id="errorBtn" hidden>⚠ Errors</button>
-                <button class="btn" data-variant="outline" data-size="sm" id="themeBtn" onclick="cycleTheme()">Auto</button>
-                <button class="btn" data-variant="outline" data-size="sm" onclick="openReorderModal()" id="reorderBtn">↕ Order</button>
-                <button class="btn" data-variant="outline" data-size="sm" onclick="refreshM3U()" id="refreshBtn">↻ Refresh</button>
-                <button class="btn" data-size="sm" onclick="openModal()">+ Add Station</button>
+                <button class="btn" data-variant="destructive" data-size="sm" x-show="errors.length" x-cloak @click="$refs.errorDialog.showModal()">⚠ Errors</button>
+                <button class="btn" data-variant="outline" data-size="sm" @click="cycleTheme()" x-text="{ auto: '🕘', light: '☀️', dark: '🌙' }[theme]">Auto</button>
+                <button class="btn" data-variant="outline" data-size="sm" @click="openReorder()">↕ Order</button>
+                <button class="btn" data-variant="outline" data-size="sm" @click="refreshM3U()" :disabled="m3uStatus" x-text="m3uStatus ?? '↻ Refresh'">↻ Refresh</button>
+                <button class="btn" data-size="sm" @click="openStation()">+ Add Station</button>
             </div>
         </header>
 
-        <section>
-            <div id="stream-list-container"></div>
+        <section class="stations">
+            <p class="note" x-show="loaded && !streams.length" x-cloak>No stations found in youtube.m3u.</p>
+            <template x-for="group in groups" :key="group.name">
+                <div class="stream-group">
+                    <div class="group-header" x-text="group.name"></div>
+                    <div class="stream-list">
+                        <template x-for="stream in group.streams" :key="stream.id">
+                            <div class="stream-item">
+                                <span class="avail-dot" :class="dotClass(stream)" :title="dotTitle(stream)"></span>
+                                <img :src="stream.logo" class="stream-logo" alt="Logo" @error="$el.style.background = 'var(--logo-placeholder)'">
+                                <div class="stream-info">
+                                    <div class="stream-name-wrapper">
+                                        <span class="station-name-text" x-text="stream.name" x-init="$nextTick(() => marquee($el))"></span>
+                                    </div>
+                                    <span class="stream-sub" x-text="subText(stream)"></span>
+                                </div>
+                                <div class="stream-actions">
+                                    <button class="btn" data-size="xs" :data-variant="isPlaying(stream) ? 'destructive' : 'outline'" :title="isPlaying(stream) ? 'Stop' : 'Play'" x-text="isPlaying(stream) ? '⏹' : '▶'" @click="togglePlay(stream)"></button>
+                                    <button title="Cast" class="btn" data-variant="outline" data-size="xs" @click="openCast(stream)">📺</button>
+                                    <button title="Edit" class="btn" data-variant="outline" data-size="xs" @click="openStation(stream)">✎</button>
+                                    <a title="YouTube" :href="`https://www.youtube.com/watch?v=${encodeURIComponent(stream.id)}`" class="btn" data-variant="outline" data-size="xs" target="_blank">↗</a>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
         </section>
 
     </div>
 
     <!-- Playback Bar -->
-    <div id="playback-bar" class="playback-bar">
-        <audio id="main-audio" preload="none"></audio>
+    <div class="playback-bar" x-show="nowPlaying" x-cloak>
+        <audio x-ref="audio" preload="none" x-effect="$el.volume = volume"></audio>
         <div class="playback-top">
             <div class="playback-content">
-                <img id="playback-logo" src="" class="playback-logo-small" alt="" onerror="this.style.background='var(--logo-placeholder)'">
+                <img :src="nowPlaying?.logo" class="playback-logo-small" alt="" @error="$el.style.background = 'var(--logo-placeholder)'">
                 <div class="playback-info-text">
-                    <span id="playback-station-name" class="playback-name">Station Name</span>
-                    <span id="playback-status" class="playback-status">Currently Playing</span>
+                    <span class="playback-name" x-text="nowPlaying?.name || 'Station'"></span>
+                    <span class="playback-status" x-text="nowPlaying?.castingTo ? `Casting to ${nowPlaying.castingTo}` : 'Currently Playing'"></span>
                 </div>
             </div>
-            <button class="btn stop-btn" data-variant="destructive" data-size="xs" onclick="stopAllAudio()">Stop</button>
+            <button class="btn stop-btn" data-variant="destructive" data-size="xs" @click="stop()">Stop</button>
         </div>
         <div class="volume-container">
-            <button id="mute-btn" class="btn volume-icon" data-variant="ghost" data-size="icon-xs" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
-            <input type="range" class="input volume-slider" id="volume-control" min="0" max="1" step="0.01" value="0.5" aria-label="Volume">
+            <button class="btn volume-icon" data-variant="ghost" data-size="icon-xs" @click="toggleMute()" title="Mute/Unmute" x-text="volume == 0 ? '🔇' : '🔊'"></button>
+            <input type="range" class="input volume-slider" min="0" max="1" step="0.01" aria-label="Volume" x-model.number="volume" :style="{ '--slider-value': `${volume * 100}%` }">
         </div>
     </div>
 
     <!-- Station Dialog -->
-    <dialog class="dialog" id="stationDialog" aria-labelledby="modalTitle">
+    <dialog class="dialog" x-ref="stationDialog" aria-labelledby="modalTitle">
         <div>
             <header>
-                <h2 id="modalTitle">Add New Station</h2>
+                <h2 id="modalTitle" x-text="form.editing ? 'Edit Station' : 'Add New Station'"></h2>
             </header>
             <section class="fields">
-                <input type="hidden" id="oldStationUrl">
                 <div class="field">
                     <label for="stationUrl">YouTube URL or Video ID</label>
-                    <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=...">
+                    <input type="text" id="stationUrl" placeholder="https://youtube.com/watch?v=..." x-model="form.url">
                 </div>
                 <div class="field">
                     <label for="stationName">Station Name</label>
-                    <input type="text" id="stationName" placeholder="Lofi Radio">
+                    <input type="text" id="stationName" placeholder="Lofi Radio" x-model="form.name">
                 </div>
                 <div class="field">
                     <label for="stationId">Station ID (Optional)</label>
-                    <input type="text" id="stationId" placeholder="LofiGirl">
+                    <input type="text" id="stationId" placeholder="LofiGirl" x-ref="stationId" x-model="form.id">
                 </div>
                 <div class="field">
                     <label for="stationGroup">Group (Optional)</label>
-                    <input type="text" id="stationGroup" placeholder="YouTube Radio">
+                    <input type="text" id="stationGroup" placeholder="YouTube Radio" x-ref="stationGroup" x-model="form.group">
                 </div>
             </section>
             <footer>
-                <button class="btn" data-variant="destructive" id="deleteBtn" onclick="openDeleteConfirmModal()" hidden>Delete</button>
-                <button class="btn" data-variant="secondary" onclick="closeModal()">Cancel</button>
-                <button class="btn" onclick="handleStationSubmit()" id="submitBtn">Save Station</button>
+                <button class="btn" data-variant="destructive" id="deleteBtn" x-show="form.editing" @click="$refs.deleteDialog.showModal()">Delete</button>
+                <button class="btn" data-variant="secondary" @click="$refs.stationDialog.close()">Cancel</button>
+                <button class="btn" @click="saveStation()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save Station'"></button>
             </footer>
         </div>
     </dialog>
 
     <!-- Delete Confirm Dialog -->
-    <dialog class="dialog" id="deleteConfirmDialog" role="alertdialog" aria-labelledby="deleteConfirmTitle" aria-describedby="deleteConfirmText">
+    <dialog class="dialog" x-ref="deleteDialog" role="alertdialog" aria-labelledby="deleteConfirmTitle" aria-describedby="deleteConfirmText">
         <div class="dialog-narrow">
             <header>
                 <h2 id="deleteConfirmTitle" class="danger">Delete Station</h2>
             </header>
             <section>
-                <p id="deleteConfirmText" class="dialog-subtitle"></p>
+                <p id="deleteConfirmText" class="dialog-subtitle">Delete "<span x-text="form.name"></span>"? This will remove it from the M3U file and cannot be undone.</p>
             </section>
             <footer>
-                <button class="btn" data-variant="secondary" onclick="closeDeleteConfirmModal()">Cancel</button>
-                <button class="btn" data-variant="destructive" id="confirmDeleteBtn" onclick="confirmDeleteStation()">Delete</button>
+                <button class="btn" data-variant="secondary" @click="$refs.deleteDialog.close()">Cancel</button>
+                <button class="btn" data-variant="destructive" @click="deleteStation()" :disabled="deleting" x-text="deleting ? 'Deleting...' : 'Delete'"></button>
             </footer>
         </div>
     </dialog>
 
     <!-- Error Dialog -->
-    <dialog class="dialog" id="errorDialog" aria-labelledby="errorDialogTitle">
+    <dialog class="dialog" x-ref="errorDialog" aria-labelledby="errorDialogTitle">
         <div>
             <header>
                 <h2 id="errorDialogTitle" class="danger">Session Error Log</h2>
             </header>
-            <section id="error-log-container-modal" class="error-list">
-                <!-- Errors will be populated here -->
+            <section class="error-list">
+                <p class="note" x-show="!errors.length">No errors reported in this session.</p>
+                <template x-for="(error, i) in errors" :key="i">
+                    <div x-text="error"></div>
+                </template>
             </section>
             <footer>
-                <button class="btn" data-variant="secondary" onclick="closeErrorModal()">Close</button>
+                <button class="btn" data-variant="secondary" @click="$refs.errorDialog.close()">Close</button>
             </footer>
         </div>
     </dialog>
 
     <!-- Cast Dialog -->
-    <dialog class="dialog" id="castDialog" aria-labelledby="castModalTitle">
+    <dialog class="dialog" x-ref="castDialog" aria-labelledby="castModalTitle">
         <div>
             <header>
                 <div class="dialog-title-row">
                     <h2 id="castModalTitle">Cast to Device</h2>
-                    <button class="btn" data-variant="outline" data-size="sm" onclick="refreshDevices()" id="refreshDevicesBtn">↻ Refresh</button>
+                    <button class="btn" data-variant="outline" data-size="sm" id="refreshDevicesBtn" @click="scanDevices()" :disabled="cast.scanning" x-text="cast.scanning ? '⌛ Scanning...' : '↻ Refresh'"></button>
                 </div>
             </header>
             <section class="fields">
-                <p id="castStationName" class="dialog-subtitle"></p>
+                <p class="dialog-subtitle" x-text="`Target Station: ${cast.stream?.name}`"></p>
                 <div class="field">
                     <label for="manualDeviceIp">Manual Device entry (IP or Location URL)</label>
                     <div class="inline-row">
-                        <input type="text" class="input" id="manualDeviceIp" placeholder="192.168.1.100">
-                        <button class="btn" data-size="sm" onclick="castToManualIp()">Cast to IP</button>
+                        <input type="text" class="input" id="manualDeviceIp" placeholder="192.168.1.100" x-model="cast.manual">
+                        <button class="btn" data-size="sm" @click="castManual()">Cast to IP</button>
                     </div>
                 </div>
-                <div id="device-list" class="device-list">
-                    <!-- Devices will be populated here -->
-                    <p class="note">Searching for devices...</p>
+                <div class="device-list">
+                    <p class="note" :class="cast.noteError && 'note-error'" x-show="cast.note" x-text="cast.note"></p>
+                    <template x-for="device in cast.devices" :key="device.udn">
+                        <div class="device-item" :class="cast.busy === device.udn && 'busy'" @click="castTo(device.udn)">
+                            <div class="device-info">
+                                <span class="device-name" x-text="device.name || 'DLNA Device'"></span>
+                                <span class="device-location" x-text="device.location || ''"></span>
+                            </div>
+                            <span class="cast-icon">📺</span>
+                        </div>
+                    </template>
                 </div>
             </section>
             <footer>
-                <button class="btn" data-variant="secondary" onclick="closeCastModal()">Cancel</button>
+                <button class="btn" data-variant="secondary" @click="$refs.castDialog.close()">Cancel</button>
             </footer>
         </div>
     </dialog>
 
     <!-- Reorder Dialog -->
-    <dialog class="dialog" id="reorderDialog" aria-labelledby="reorderTitle">
+    <dialog class="dialog" x-ref="reorderDialog" aria-labelledby="reorderTitle">
         <div class="reorder-modal">
             <header>
                 <div class="dialog-title-row">
                     <h2 id="reorderTitle">Reorder Stations</h2>
-                    <button class="btn" data-variant="secondary" data-size="sm" onclick="closeReorderModal()" aria-label="Close">✕</button>
+                    <button class="btn" data-variant="secondary" data-size="sm" @click="$refs.reorderDialog.close()" aria-label="Close">✕</button>
                 </div>
                 <p class="dialog-hint">Drag to reorder. Blank lines separate groups in the saved file.</p>
             </header>
-            <div id="reorder-list" class="reorder-list"></div>
+            <div class="reorder-list">
+                <p class="note note-error" x-show="reorder.status === 'error'">Failed to load stations.</p>
+                <p class="note" x-show="reorder.status === 'ready' && !reorder.items.length">No stations.</p>
+                <template x-for="(stream, i) in reorder.items" :key="stream.id">
+                    <div class="reorder-row">
+                        <div class="reorder-group-label" x-show="startsGroup(i)" x-text="groupOf(stream)"></div>
+                        <div class="reorder-item" draggable="true"
+                             :class="{ dragging: reorder.dragIdx === i, 'drag-over': reorder.overIdx === i }"
+                             @dragstart="reorder.dragIdx = i; $event.dataTransfer.effectAllowed = 'move'"
+                             @dragover.prevent="reorder.overIdx = i; $event.dataTransfer.dropEffect = 'move'"
+                             @dragleave="if (reorder.overIdx === i) reorder.overIdx = null"
+                             @drop.prevent="dropAt(i)"
+                             @dragend="reorder.dragIdx = reorder.overIdx = null">
+                            <span class="drag-handle">⠿</span>
+                            <img class="reorder-thumb" :src="stream.logo" alt="" @error="$el.style.background = 'var(--logo-placeholder)'">
+                            <span class="reorder-name" x-text="stream.name"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
             <footer>
-                <button class="btn" data-variant="secondary" onclick="closeReorderModal()">Cancel</button>
-                <button class="btn" onclick="saveOrder()" id="saveOrderBtn">Save Order</button>
+                <button class="btn" data-variant="secondary" @click="$refs.reorderDialog.close()">Cancel</button>
+                <button class="btn" @click="saveOrder()" :disabled="reorderStatus" x-text="reorderStatus ?? 'Save Order'"></button>
             </footer>
         </div>
     </dialog>
 
-    <script>const SERVER_ID = '{{ server_id }}';</script>
+    <!-- script.js registers the component on 'alpine:init', so it must load before Alpine -->
     <script src="/static/script.js"></script>
+    <!-- Alpine.js 3.17.4 (alpinejs.dev, MIT), vendored from alpinejs/dist/cdn.min.js -->
+    <script src="/static/vendor/alpine.min.js"></script>
 </body>
 </html>
